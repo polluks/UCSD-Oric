@@ -5,6 +5,15 @@
 
 .include "oric_hardware.i"
 
+; Unit numbers for CSP I/O calls (from pcode_constants.i)
+UNIT_CONSOLE = 1
+UNIT_SYSTERM = 2
+UNIT_GRAPHIC = 3
+UNIT_PRINTER = 4
+UNIT_REMIN   = 5
+UNIT_REMOUT  = 6
+UNIT_DISK1   = 9
+
 ; Segment offsets (address - $C000)
 OFS_DWRITE = $0000
 OFS_DREAD  = $0003
@@ -59,8 +68,8 @@ CSPTBL:
     .addr   csp_flc         ; 10 FLC
     .addr   csp_unimpl      ; 11 SCN
     .addr   csp_ustat       ; 12 USTAT
-    .addr   0               ; 13
-    .addr   0               ; 14
+    .addr   csp_unimpl      ; 13
+    .addr   csp_unimpl      ; 14
     .addr   csp_lds         ; 15 LDS
     .addr   csp_unimpl      ; 16 ULS
     .addr   csp_tnc         ; 17 TNC
@@ -82,10 +91,10 @@ CSPTBL:
     .addr   csp_hlt         ; 33 HLT
     .addr   csp_memav       ; 34 MEMAV
 
-; CSPTBL ends at offset $C146. Pad 12 bytes to $C152.
+; CSPTBL ends at offset $C146. Pad to $C152.
 csp_unimpl:
-    rts
-    .res    11, $EA
+    jmp     csp_unimpl_handler
+    .res    9, $EA
 
 ;===============================================================================
 ; $C152: COLD - Cold start entry
@@ -132,12 +141,9 @@ welcome_msg:
     .byte   0
 
 ; Pad to $C899 (offset $0899)
-; Current offset = OFS_COLD + (current - COLD_START)
-; But COLD_START is at OFS_COLD ($0152) + some bytes
-; Message takes ~36 bytes, code ~35, total cold ~71 = $47
-; So current offset ~ $0152 + $47 = $0199
-; Padding needed = $0899 - $0199 = $0700
-    .res    $0700, $EA
+; COLD code ~69 bytes, welcome_msg ~29 bytes, total ~98 = $62
+; $C152 + $62 = $C1B4 → padding to $C899 = $C899 - $C1B4 = $06E5
+    .res    $06E5, $EA
 
 ;===============================================================================
 ; $C899: CONCK - Console check
@@ -461,18 +467,26 @@ disk_init:
 ; disk_read, disk_write, disk_status
 ;===============================================================================
 disk_read:
-    clc
-    rts
+    jmp     fdc_read_sector
 
 disk_write:
-    clc
-    rts
+    jmp     fdc_write_sector
 
 disk_status:
-    lda     FDC_STAT
-    ldx     #0
-    clc
-    rts
+    jmp     fdc_get_status
+
+;===============================================================================
+; csp_unimpl_handler - Unimplemented CSP returns 0
+;===============================================================================
+csp_unimpl_handler:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
+    lda     #0
+    pha
+    pha
+    jmp     (csp_ret)
 
 ;===============================================================================
 ; pr_init, pr_write (printer)
@@ -556,6 +570,9 @@ int_tmp:    .res 2
 int_ptr:    .res 2
 int_tmp2:   .res 2
 int_ptr2:   .res 2
+csp_ret:    .res 2
+dsk_buf:    .res 2
+cur_trk:    .res 1
 
 ; BIOS data segment
 .segment "BIOSDATA"
@@ -1341,15 +1358,31 @@ get_big:
 
 ; CSP 0: IOC - I/O Control
 csp_ioc:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
     lda     #0
     pha
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
     pha
     rts
 
 ; CSP 1: NEW - Allocate (push NIL)
 csp_new:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
     lda     #0
     pha
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
     pha
     rts
 
@@ -1360,159 +1393,328 @@ csp_exit:
     jmp     COLD_START
 
 ; CSP 5: UREAD - Unit Read
-; Params (TOS first): mode(W), count(W), block(W), buf(W), unit(W)
+; Stack layout: [csp_ret, unit_lo, unit_hi, buf_lo, buf_hi,
+;                 block_lo, block_hi, count_lo, count_hi, mode_lo, mode_hi]
 csp_uread:
     pla
-    sta     int_ptr     ; mode low
-    pla                 ; mode high
+    sta     csp_ret
     pla
-    sta     int_tmp2    ; count low
-    pla                 ; count high
-    pla                 ; block low
-    pla                 ; block high
+    sta     csp_ret+1
     pla
-    sta     int_tmp     ; buffer low
+    sta     int_ptr2    ; unit lo
+    pla                 ; unit hi
     pla
-    sta     int_tmp+1   ; buffer high
+    sta     dsk_buf     ; buf lo
     pla
-    sta     int_ptr2    ; unit low
-    pla                 ; unit high (ignore)
+    sta     dsk_buf+1   ; buf hi
+    pla
+    sta     int_ptr     ; block lo
+    pla
+    sta     int_ptr+1   ; block hi
+    pla
+    sta     int_tmp2    ; count lo
+    pla                 ; count hi
+    pla                 ; mode lo
+    pla                 ; mode hi
     lda     int_ptr2
-    cmp     #1
+    cmp     #UNIT_CONSOLE
     beq     @con
-    cmp     #2
-    bne     @done
+    cmp     #UNIT_SYSTERM
+    beq     @con
+    cmp     #UNIT_DISK1
+    beq     @dsk
+    jmp     @done
 @con:
     ldy     #0
 :   jsr     con_read
-    sta     (int_tmp), y
+    sta     (dsk_buf), y
     iny
     cpy     int_tmp2
     bne     :-
+    jmp     @done
+@dsk:
+    ; Convert 512-byte block# to 256-byte sector#: sector = block * 2
+    asl     int_ptr
+    rol     int_ptr+1
+    ; Convert sector# to track/sector-on-track
+    ; Track = sector / 17, Sector-on-track = (sector % 17) + 1
+    lda     int_ptr
+    ldx     #0
+:   cmp     #17
+    bcc     :+
+    sbc     #17
+    inx
+    jmp     :-
+:   tay                 ; Y = sector-on-track (0-indexed)
+    iny                 ; Y = sector-on-track (1-indexed)
+    txa                 ; A = track
+    tax                 ; X = track
+    jsr     fdc_read_sector
+    bcc     @done
+    lda     #1
+    pha
+    lda     #0
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
+    pha
+    rts
 @done:
     lda     #0
     pha
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
     pha
     rts
 
 ; CSP 6: UWRITE - Unit Write
 csp_uwrite:
     pla
-    sta     int_ptr     ; mode low
-    pla                 ; mode high
+    sta     csp_ret
     pla
-    sta     int_tmp2    ; count low
-    pla                 ; count high
-    pla                 ; block low
-    pla                 ; block high
+    sta     csp_ret+1
     pla
-    sta     int_tmp     ; buffer low
+    sta     int_ptr2    ; unit lo
+    pla                 ; unit hi
     pla
-    sta     int_tmp+1   ; buffer high
+    sta     dsk_buf     ; buf lo
     pla
-    sta     int_ptr2    ; unit low
-    pla                 ; unit high
+    sta     dsk_buf+1   ; buf hi
+    pla
+    sta     int_ptr     ; block lo
+    pla
+    sta     int_ptr+1   ; block hi
+    pla
+    sta     int_tmp2    ; count lo
+    pla                 ; count hi
+    pla                 ; mode lo
+    pla                 ; mode hi
     lda     int_ptr2
-    cmp     #1
+    cmp     #UNIT_CONSOLE
     beq     @con
-    cmp     #2
-    bne     @done
+    cmp     #UNIT_SYSTERM
+    beq     @con
+    cmp     #UNIT_DISK1
+    beq     @dsk
+    jmp     @done
 @con:
     ldy     #0
-:   lda     (int_tmp), y
+:   lda     (dsk_buf), y
     jsr     con_write
     iny
     cpy     int_tmp2
     bne     :-
+    jmp     @done
+@dsk:
+    asl     int_ptr
+    rol     int_ptr+1
+    lda     int_ptr
+    ldx     #0
+:   cmp     #17
+    bcc     :+
+    sbc     #17
+    inx
+    jmp     :-
+:   tay
+    iny
+    txa
+    tax
+    jsr     fdc_write_sector
 @done:
     lda     #0
     pha
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
     pha
     rts
 
 ; CSP 9: TIM - Time (push 0)
 csp_tim:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
     lda     #0
     pha
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
     pha
     rts
 
 ; CSP 10: FLC - FillChar (stub)
 csp_flc:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
     lda     #0
     pha
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
     pha
     rts
 
 ; CSP 12: USTAT - Unit Status (push 0 = ready)
 csp_ustat:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
     lda     #0
     pha
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
     pha
     rts
 
 ; CSP 15: LDS - LoadSegment (stub, push -1)
 csp_lds:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
     lda     #$FF
     pha
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
     pha
     rts
 
 ; CSP 17: TNC - Truncate (stub, push 0)
 csp_tnc:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
     lda     #0
     pha
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
     pha
     rts
 
 ; CSP 18: RND - Round (stub, push 0)
 csp_rnd:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
     lda     #0
     pha
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
     pha
     rts
 
 ; CSP 26: MRK - Mark heap (push NP)
 csp_mrk:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
     lda     NP
     pha
     lda     NP+1
     pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
+    pha
     rts
 
-; CSP 27: RLS - Release heap (pop to NP)
+; CSP 27: RLS - Release heap (pop param to NP)
 csp_rls:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
     pla
     sta     NP+1
     pla
     sta     NP
+    lda     #0
+    pha
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
+    pha
     rts
 
 ; CSP 28: IOR - I/O Result (push 0 = no error)
 csp_ior:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
     lda     #0
     pha
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
     pha
     rts
 
 ; CSP 29: UBUSY - Unit Busy (push 0 = not busy)
 csp_ubusy:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
     lda     #0
     pha
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
     pha
     rts
 
 ; CSP 31: UWAIT - Unit Wait
 csp_uwait:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
     lda     #0
     pha
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
     pha
     rts
 
 ; CSP 32: UCLR - Unit Clear
 csp_uclr:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
     lda     #0
     pha
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
     pha
     rts
 
@@ -1522,6 +1724,10 @@ csp_hlt:
 
 ; CSP 34: MEMAV - Memory Available
 csp_memav:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
     sec
     lda     KP
     sbc     NP
@@ -1530,6 +1736,10 @@ csp_memav:
     sbc     NP+1
     pha
     lda     int_tmp
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
     pha
     rts
 
@@ -1717,3 +1927,95 @@ keytable_shifted:
     .byte   'U', 'I', 'O', 'P', $00, $08, '}', '{'      ; Col 5
     .byte   'Y', 'H', 'G', 'E', $00, 'A', 'S', 'W'      ; Col 6
     .byte   '*', 'L', ')', '?', $00, $0D, '~', '+'      ; Col 7
+
+;===============================================================================
+; FDC Driver - Microdisc WD1793 routines (in CODE segment)
+;===============================================================================
+; Calling conventions:
+;   fdc_read_sector:  X=track(0-39), Y=sector(1-17), dsk_buf=buffer
+;   fdc_write_sector: X=track(0-39), Y=sector(1-17), dsk_buf=buffer
+;   fdc_get_status:   returns A=0 ready, A=$FF not ready (C=1 if error)
+
+; Wait for FDC not busy
+_fdc_wait:
+    lda     FDC_STAT
+    and     #$01
+    bne     _fdc_wait
+    rts
+
+; Wait for DRQ
+_fdc_drq:
+    lda     FDC_STAT
+    and     #$02
+    beq     _fdc_drq
+    rts
+
+; Seek to track in A (cached in cur_trk)
+_fdc_seek:
+    cmp     cur_trk
+    beq     :+
+    sta     FDC_TRK
+    sta     cur_trk
+    lda     #FDC_CMD_SEEK
+    sta     FDC_STAT
+    jsr     _fdc_wait
+:   rts
+
+; Read one 256-byte sector
+fdc_read_sector:
+    jsr     _fdc_wait
+    txa
+    jsr     _fdc_seek
+    sty     FDC_SEC
+    lda     #FDC_CMD_READSEC
+    sta     FDC_STAT
+    jsr     _fdc_drq
+    ldy     #0
+:   lda     FDC_DATA
+    sta     (dsk_buf), y
+    iny
+    bne     :-
+    jsr     _fdc_wait
+    lda     FDC_STAT
+    and     #$1C
+    beq     :+
+    sec
+    rts
+:   clc
+    rts
+
+; Write one 256-byte sector
+fdc_write_sector:
+    jsr     _fdc_wait
+    txa
+    jsr     _fdc_seek
+    sty     FDC_SEC
+    lda     #FDC_CMD_WRITESEC
+    sta     FDC_STAT
+    jsr     _fdc_drq
+    ldy     #0
+:   lda     (dsk_buf), y
+    sta     FDC_DATA
+    iny
+    bne     :-
+    jsr     _fdc_wait
+    lda     FDC_STAT
+    and     #$7C
+    beq     :+
+    sec
+    rts
+:   clc
+    rts
+
+; Get FDC status
+fdc_get_status:
+    jsr     _fdc_wait
+    lda     FDC_STAT
+    and     #$80
+    beq     :+
+    lda     #$FF
+    sec
+    rts
+:   lda     #0
+    clc
+    rts

@@ -126,6 +126,9 @@ MODE_HIRES      = $01
 ;===============================================================================
 ZP_START     = $00
 STACK_6502   = $0100     ; 6502 hardware stack (p-machine eval stack)
+CSP_RET      = $0A       ; 2 bytes - csp_return save for CSP handlers
+DSK_BUF      = $0C       ; 2 bytes - disk buffer pointer
+CUR_TRK      = $0E       ; 1 byte - FDC current track cache
 VIA_AREA     = $0300     ; VIA + FDC I/O page
 HEAP_START   = $0500     ; Heap start (NP initial value)
 STD_CHARSET_ADDR = $9800

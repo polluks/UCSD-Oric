@@ -5,16 +5,19 @@ AS      := ca65
 LD      := ld65
 CFLAGS  := -t none -I include
 LDFLAGS := -C oric.cfg
+PY      := python3
 
 OUTDIR  := out
 TARGET  := $(OUTDIR)/SYSTEM.ORIC
+ROM     := $(OUTDIR)/system.rom
+DSK     := $(OUTDIR)/system.dsk
 
 # Source
 MAIN_SRC := src/bios.asm
 
-.PHONY: all clean disk
+.PHONY: all clean disk emul rom
 
-all: $(TARGET)
+all: $(DSK)
 
 $(OUTDIR):
 	mkdir -p $(OUTDIR)
@@ -25,20 +28,21 @@ $(OUTDIR)/bios.o: $(MAIN_SRC) include/*.i | $(OUTDIR)
 $(TARGET): $(OUTDIR)/bios.o oric.cfg | $(OUTDIR)
 	$(LD) $(LDFLAGS) -o $@ $(OUTDIR)/bios.o --mapfile $(OUTDIR)/system.map
 
-# Create disk image for Oricutron (simple flat disk)
-disk: $(TARGET)
-	@echo "Creating disk image..."
-	dd if=/dev/zero of=$(OUTDIR)/oric_pascal.dsk bs=256 count=560 2>/dev/null
-	dd if=$(TARGET) of=$(OUTDIR)/oric_pascal.dsk bs=256 seek=1 conv=notrunc 2>/dev/null
-	@echo "Disk image: $(OUTDIR)/oric_pascal.dsk"
-	@echo "Size: $$(wc -c < $(TARGET)) bytes"
+# Post-process linker output into 16KB flat ROM image
+$(ROM): $(TARGET) post_process.py
+	$(PY) post_process.py
+
+# Create bootable Microdisc disk image (boot sector + system data)
+$(DSK): $(ROM) makedisk.py
+	$(PY) makedisk.py
+
+# Build ROM only
+rom: $(ROM)
+
+# Emulate with Oricutron
+emul: $(DSK)
+	oricutron $(DSK)
 
 # Clean
 clean:
 	rm -rf $(OUTDIR)
-
-# Emulate with Oricutron
-emul: disk
-	oricutron $(OUTDIR)/oric_pascal.dsk
-
-.PHONY: all clean disk emul
