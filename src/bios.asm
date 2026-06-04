@@ -284,6 +284,8 @@ con_init:
     sta     TEXT_SCREEN
     lda     #$10 | COLOR_BLACK
     sta     TEXT_SCREEN+1
+    lda     #ATTR_MODE | 0           ; VIDEO: TEXT 40x28 50Hz
+    sta     TEXT_SCREEN+2
     lda     #0
     sta     con_curcol
     sta     con_currow
