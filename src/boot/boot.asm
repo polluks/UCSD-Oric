@@ -27,8 +27,8 @@ BOOT_START:
     sta     VIA_DDRA
 
 ; Disable ROM overlay -> RAM appears at $C000-$FFFF
-; FDC control reg: ROMDIS (bit3) | single density/FM (bit1=0) | DRVSEL0
-    lda     #$08
+; FDC control reg: MFM (bit3=0), clk div (bit2=1), ROM disable (bit1=0)
+    lda     #$04
     sta     FDC_CTRL
 
 ; Step 3: Restore drive (seek track 0)

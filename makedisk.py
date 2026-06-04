@@ -64,8 +64,8 @@ def make_boot_sector(num_sectors):
     # lda #$0F; sta VIA_DDRA
     emit([0xA9, 0x0F, 0x8D, addr_le(VIA_DDRA)[0], addr_le(VIA_DDRA)[1]])
 
-    # lda #$08 (ROMDIS | SDSEL | FM/single density); sta FDC_CTRL
-    emit([0xA9, 0x08, 0x8D, addr_le(FDC_CTRL)[0], addr_le(FDC_CTRL)[1]])
+    # lda #$04 (MFM, ROM disable, clk divisor=1); sta FDC_CTRL
+    emit([0xA9, 0x04, 0x8D, addr_le(FDC_CTRL)[0], addr_le(FDC_CTRL)[1]])
 
     # lda #$03 (RESTORE); sta FDC_STAT
     emit([0xA9, 0x03, 0x8D, addr_le(FDC_STAT)[0], addr_le(FDC_STAT)[1]])

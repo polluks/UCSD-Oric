@@ -83,7 +83,7 @@ FDC_CMD_READTRK  = $E0      ; Read track
 FDC_CMD_FORCEINT = $D0      ; Force interrupt
 
 ; FDC control register bits
-FDC_ROMDIS  = $02           ; Disable ROM, enable overlay RAM
+FDC_ROMDIS  = $04           ; Disable ROM (bit1=0), MFM (bit3=0), clk divisor (bit2=1)
 FDC_INTRQEN = $01           ; Enable FDC interrupt to CPU
 FDC_DRVSEL0 = $00           ; Drive select 0
 FDC_SDSEL   = $08           ; Single density select
