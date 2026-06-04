@@ -149,12 +149,127 @@ $BFFF         Top of stack (KP initial value)
 - Oric NMI is not connected
 - ROM handler decrements WAIT counter, polls keyboard, updates clock
 
+## Microdisc ROM Boot Flow (Critical - Reverse Engineered)
+
+The Microdisc ROM (8KB at $E000-$FFFF) has its own boot sequence that is **not** compatible with Apple II-style chain-loading from sector 0. Understanding this is essential for creating a bootable p-System disk.
+
+### ROM Reset Flow ($EB7E)
+
+```
+RESET → init hardware → set memory bounds ($97FF top) → init I/O vectors
+  → PRINT "insert system disc" to screen (DEFAULT, $ECBB)
+  → Read track 0, sector 1 to $C000 ($ECDD)
+  → Copy "SYSTEMDOS" key from $EE40-$EE49 to $C12B-$C134 ($ECC0)
+  → Init check: LDA $C013 from boot sector; if ZERO → error ($E846)
+  → Search directory at $C026+ for "SYSTEMDOS" filename ($ECE3)
+    ├── NOT FOUND → error handler (screen stays on "insert system disc")
+    └── FOUND → clear screen ($ECE6)
+                → print boot message from $ED5A (copied to $9FD0 then to screen)
+                → print "ORIC EXTENDED BASIC V1.x" (from $EDF1)
+                → Copy 27-byte JMP vector table from $ED3F to $BFE0 ($ECFF-$ED08)
+                → Check boot sector byte $C007 for BAS vector selection ($ED09)
+                  ├── $C007=0 → vector = $EDAE (default)
+                  └── $C007≠0 → vector = $EDF1 (alt)
+                → JSR ($0C) via $E854 → execute selected vector ($EDAE or $EDF1)
+                → Copy 10 bytes from $EE4A to $C12B-$C134 (sets up BOOTUPCOM search key?)
+                → Search directory for "BOOTUPCOM" ($ED28)
+                  ├── FOUND → JMP $BFE0 → JMP ($C14B) → execute
+                  └── NOT FOUND → print "Ready", JMP $BFE0 (BASIC prompt)
+```
+
+### Key Facts
+- **"insert system disc"** is the **default boot screen** — it's displayed immediately at $ECBB before any disk access. The screen is only cleared at $ECE6 after a successful "SYSTEMDOS" directory search.
+- **The ROM reads track 0, sector 1** (not sector 0!) to $C000 at $ECDD via `LDA #$13 / STA $0311` (Read Sector command = $13).
+- **Directory format**: 16-byte entries starting at offset $26 of the sector ($C026 in CPU space).
+  - Bytes 0-8: filename (9 bytes, space-padded)
+  - Bytes 9-11: extension (3 bytes)
+  - Byte 12: descriptor track
+  - Byte 13: descriptor sector
+  - Byte 14: number of sectors in file
+  - Byte 15: flags ($40 = UNPROT, $00 = PROT)
+- **Expected filenames**: First "SYSTEMDOS" (the directory/filer kernel), then "BOOTUPCOM" (the executable to run).
+- **The ROM does NOT chain-load from sector 0** — it expects a Sedoric/Stratsed directory structure.
+- **Init check at $E846**: `LDX $C000` (always 0 for first entry), then `LDA $C013,X` → checks byte at offset $13 of boot sector. **Must be non-zero** (e.g. $FF) or the ROM returns to "insert system disc" screen.
+- **Search key** at $C12C-$C134: 9 bytes copied from $EE41-$EE49 in reverse via `LDA $EE40,X / STA $C12B,X` with X=9..0. Result at $C12C-$C134 = "SYSTEMDOS".
+- **$C14B vector setup**: After SYSTEMDOS file loading, $C14B = $C023 and $C14C = $C024 from the data sector (forward pointer stored at $E394). The vector table at $BFE0 ends with `JMP ($C14B)` at $BFF8-$BFFA ($6C $4B $C1). The `JMP $BFE0` at $ED3C thereby redirects to whatever address $C14B points to.
+
+  **Critical insight**: The forward pointer bytes $C023-$C024 are reused as the JMP vector target. For a successful boot, set:
+  - $C023 = low byte of page containing entry address
+  - $C024 = high byte of page containing entry address
+  - Then JMP ($C14B) = JMP (pointer at $C023,$C024)
+
+  For example: $C023=$00, $C024=$C0 → JMP ($C000). The entry address must be at $C000-$C001 as a 2-byte pointer (not 6502 code!).
+- **No BOOTUPCOM required**: If BOOTUPCOM is not found, the ROM still JMP $BFE0 and executes the same vector table. For our p-System, SYSTEMDOS can be the sole file that triggers boot.
+
+### Boot Sector Content Required
+For the p-System to boot, we must provide a disk where track 0, sector 1 contains a valid Sedoric directory structure. The boot sector must set:
+- **$C013** = non-zero (passes init check)
+- **$C026-$C02E**: first directory entry = "SYSTEMDOS" (9 bytes name + extension bytes)
+- **$C033-$C034**: directory track/sector pointer (e.g., track 1, sector 1)
+
+### Sedoric File System Format (Data Layout)
+
+The Sedoric format uses a multi-level indirection for file storage:
+
+#### Directory Sector (256 bytes)
+```
+Offset  Usage
+$00-$22 Header/reserved
+$23-$24 Forward pointer (track, sector) for next directory sector (0,0 = last)
+$25     File count in directory
+$26+    16-byte entries:
+  [0-8]  Filename (9 bytes, space-padded)
+  [9-11] Extension (3 bytes)
+  [12]   Descriptor track
+  [13]   Descriptor sector
+  [14]   Number of sectors
+  [15]   Flags ($40=UNPROT)
+```
+
+#### Descriptor Sector (256 bytes)
+Each data block = 2 bytes (track, sector), followed by $FF terminator:
+```
+$00-$22: header/reserved
+$23-$24: forward pointer
+$25-$2C: metadata
+$2D+: pairs of (data_track, data_sector), terminated by $FF
+```
+
+#### Data Sector (256 bytes) - Count-Group Format
+```
+$00-$22   Header/reserved
+$23-$24   Forward pointer (track, sector; 0,0 = none)
+$25-$2C   Metadata (including $27-$28 = copy destination address!)
+$2D+      Count-groups: [count_byte, count_bytes_of_data...]
+  count = $00: skip
+  count = $01-$FE: copy that many bytes to destination
+  count = $FF: end of sector data
+```
+
+**Critical**: The copy destination address comes from $C027-$C028 of the **data sector** (NOT the directory entry!), read at $E4FC-$E505. Default via Sedoric name encoding: SYSTEMDOS → $59, $53 → destination $5359.
+
+**Copy loop** ($E579-$E5C1): Reads count-groups from data sector at $C000, copies to destination address. Each group is [count] followed by [count bytes]. After one group, advances to next count byte. Continues until either sector count ($C12D) reaches 0 or forward pointer ($C14B-$C14C) is 0,0.
+
+### Current Boot Strategy (p-System)
+
+**SYSTEMDOS = Mini Boot Loader** (~192 bytes loaded to $C000 via count-group from 1 data sector):
+
+1. Boot sector on track 0, sector 1 has directory entry for SYSTEMDOS
+2. ROM finds SYSTEMDOS, reads descriptor → reads 1 data sector
+3. Data sector $C027-$C028 = $00, $C0 → dest = $C000
+4. Data sector $C023-$C024 = $00, $C1 → $C14B = $C100 → JMP ($C100)
+5. But we use $00,$C0 instead → JMP ($C000)
+6. First 2 bytes of data ($C000-$C001) = entry address for JMP indirect
+7. Boot loader at $C002+ runs, uses WD1793 FDC to load full system.rom from disk
+8. Boot loader jumps to COLD ($C152) which initializes p-machine → interpreter at $D100
+
 ## Porting Strategy
 
 ### Phase 1: Bootloader + BIOS skeleton
-1. Write Oric boot sector (loads SYSTEM.ORIC from disk)
-2. Write BIOS entry points (stubs that return success)
-3. Verify interpreter can start, reach "Welcome" screen
+1. Understand Microdisc ROM boot format (Sedoric/Stratsed directory on track 0, sector 1)
+2. Create bootable disk with valid directory structure for the ROM
+3. Write BIOS entry points (stubs that return success)
+4. Verify interpreter can start, reach "Welcome" screen
 
 ### Phase 2: Console I/O
 1. Implement CWRITE (character output via ULA text)
