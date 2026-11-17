@@ -8,40 +8,42 @@ LDFLAGS := -C oric.cfg
 PY      := python3
 
 OUTDIR  := out
-TARGET  := $(OUTDIR)/SYSTEM.ORIC
-ROM     := $(OUTDIR)/system.rom
-DSK     := $(OUTDIR)/system.dsk
+LINKED  := $(OUTDIR)/SYSTEM.bin    # raw ld65 output
+SYSIMG  := $(OUTDIR)/SYSTEM.ORIC   # 6400-byte system image (boot payload)
+LOADER  := $(OUTDIR)/boot.bin      # boot loader, assembled at $0200
+DSK     := $(OUTDIR)/SYSTEM.dsk    # bootable Microdisc image
 
-# Source
-MAIN_SRC := src/bios.asm
-
-.PHONY: all clean disk emul rom
+.PHONY: all clean disk emul image
 
 all: $(DSK)
 
 $(OUTDIR):
 	mkdir -p $(OUTDIR)
 
-$(OUTDIR)/bios.o: $(MAIN_SRC) include/*.i | $(OUTDIR)
+$(OUTDIR)/bios.o: src/bios.asm include/*.i | $(OUTDIR)
 	$(AS) $(CFLAGS) -o $@ $<
 
-$(TARGET): $(OUTDIR)/bios.o oric.cfg | $(OUTDIR)
+$(LINKED): $(OUTDIR)/bios.o oric.cfg | $(OUTDIR)
 	$(LD) $(LDFLAGS) -o $@ $(OUTDIR)/bios.o --mapfile $(OUTDIR)/system.map
 
-# Post-process linker output into 16KB flat ROM image
-$(ROM): $(TARGET) post_process.py
-	$(PY) post_process.py
+$(SYSIMG): $(LINKED) build_image.py $(OUTDIR)/system.map
+	$(PY) build_image.py
 
-# Create bootable Microdisc disk image (boot sector + system data)
-$(DSK): $(ROM) makedisk.py
+$(OUTDIR)/boot.o: src/boot/boot.asm include/*.i | $(OUTDIR)
+	$(AS) $(CFLAGS) -o $@ $<
+
+$(LOADER): $(OUTDIR)/boot.o src/boot/boot.cfg
+	$(LD) -C src/boot/boot.cfg -o $@ $(OUTDIR)/boot.o
+
+$(DSK): $(SYSIMG) $(LOADER) makedisk.py
 	$(PY) makedisk.py
 
-# Build ROM only
-rom: $(ROM)
+# Build the system image only
+image: $(SYSIMG)
 
 # Emulate with Oricutron
 emul: $(DSK)
-	oricutron $(DSK)
+	oricutron -m atmos -k microdisc -d $(DSK)
 
 # Clean
 clean:

@@ -62,31 +62,44 @@ AY_PCR_READ_DATA  = $CE    ; CA2=1, CB2=0 (read data from register)
 
 ;===============================================================================
 ; Microdisc FDC WD1793 at $0310
+; (register order taken from the Microdisc ROM symbols: md_FDC_COMMAND=$0310,
+;  md_FDC_TRACK=$0311, md_FDC_SECTOR=$0312, md_FDC_DATA=$0313)
 ;===============================================================================
-FDC      = $0310
-FDC_DATA  = $0310       ; Data register
-FDC_STAT  = $0311       ; Status (read) / Command (write)
-FDC_TRK   = $0312       ; Track register
-FDC_SEC   = $0313       ; Sector register
+FDC       = $0310       ; same as FDC_CMD, kept for old code
+FDC_CMD   = $0310       ; Write: command   Read: status
+FDC_STAT  = $0310       ; Read: status (alias of FDC_CMD)
+FDC_TRK   = $0311       ; Track register (writing it does NOT seek)
+FDC_SEC   = $0312       ; Sector register
+FDC_DATA  = $0313       ; Data register
 FDC_CTRL  = $0314       ; Control register
-FDC_DRQ   = $0318       ; DRQ status (bit 7 = 0 when ready)
+FDC_DRQ   = $0318       ; DRQ status: bit 7 = 0 -> byte available
 
-; FDC command bits (WD1793)
+; FDC commands (WD1793)
 FDC_CMD_RESTORE  = $03      ; Restore (seek track 0)
-FDC_CMD_SEEK     = $1F      ; Seek to track
-FDC_CMD_STEP     = $2B      ; Step in
-FDC_CMD_STEPOUT  = $4B      ; Step out
-FDC_CMD_READSEC  = $80      ; Read sector
-FDC_CMD_WRITESEC = $A0      ; Write sector
+FDC_CMD_SEEK     = $1F      ; Seek to track in the data register
+FDC_CMD_STEPIN   = $40      ; Step in
+FDC_CMD_STEPOUT  = $60      ; Step out
+FDC_CMD_READSEC  = $80      ; Read one sector
+FDC_CMD_READMULT = $90      ; Read multiple sectors
+FDC_CMD_WRITESEC = $A0      ; Write one sector
 FDC_CMD_READADDR = $C0      ; Read address
-FDC_CMD_READTRK  = $E0      ; Read track
 FDC_CMD_FORCEINT = $D0      ; Force interrupt
+FDC_CMD_READTRK  = $E0      ; Read track
 
-; FDC control register bits
-FDC_ROMDIS  = $04           ; Disable ROM (bit1=0), MFM (bit3=0), clk divisor (bit2=1)
-FDC_INTRQEN = $01           ; Enable FDC interrupt to CPU
-FDC_DRVSEL0 = $00           ; Drive select 0
-FDC_SDSEL   = $08           ; Single density select
+; FDC control register bits ($0314)
+;   bit 0    IRQ enable
+;   bit 1    1 = BASIC ROM visible, 0 = overlay RAM at $C000
+;   bit 2    1 = MFM / double density, 0 = FM / single density
+;   bit 4    side select
+;   bits 5-6 drive select
+;   bit 7    1 = Microdisc ROM disabled at $E000
+FDC_CTRL_MFM    = $04       ; double density (MFM)
+FDC_CTRL_ROMEN  = $02       ; BASIC ROM visible at $C000 (overlay off)
+FDC_CTRL_ROMDIS = $80       ; Microdisc ROM disabled at $E000
+FDC_CTRL_READY  = FDC_CTRL_MFM | FDC_CTRL_ROMDIS   ; $84, as used by the ROM
+FDC_INTRQEN     = $01       ; Enable FDC interrupt to CPU
+FDC_DRVSEL0     = $00       ; Drive select 0
+FDC_SDSEL       = $00       ; single density (bit2 = 0)
 
 ;===============================================================================
 ; ULA Display

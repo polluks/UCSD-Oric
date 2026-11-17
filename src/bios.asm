@@ -454,15 +454,15 @@ scan_kbd:
 ; disk_init
 ;===============================================================================
 disk_init:
-    lda     #FDC_ROMDIS
+    lda     #FDC_CTRL_READY
     sta     FDC_CTRL
-    lda     #$D0
-    sta     FDC_STAT
-    ldx     #$FF
-:   dex
-    bne     :-
-    lda     #$03
-    sta     FDC_STAT
+    lda     #FDC_CMD_FORCEINT
+    sta     FDC_CMD
+    lda     #0
+    sta     cur_trk
+    lda     #FDC_CMD_RESTORE
+    sta     FDC_CMD
+    jsr     _fdc_wait
     rts
 
 ;===============================================================================
@@ -1945,23 +1945,24 @@ _fdc_wait:
     bne     _fdc_wait
     rts
 
-; Wait for DRQ
+; Wait for a byte: DRQ is bit 7 of $0318 and is active low
 _fdc_drq:
-    lda     FDC_STAT
-    and     #$02
-    beq     _fdc_drq
+    lda     FDC_DRQ
+    bmi     _fdc_drq
     rts
 
 ; Seek to track in A (cached in cur_trk)
 _fdc_seek:
     cmp     cur_trk
-    beq     :+
+    beq     @done
+    sta     FDC_DATA        ; target track goes in the data register
     sta     FDC_TRK
     sta     cur_trk
     lda     #FDC_CMD_SEEK
-    sta     FDC_STAT
+    sta     FDC_CMD
     jsr     _fdc_wait
-:   rts
+@done:
+    rts
 
 ; Read one 256-byte sector
 fdc_read_sector:
@@ -1970,20 +1971,22 @@ fdc_read_sector:
     jsr     _fdc_seek
     sty     FDC_SEC
     lda     #FDC_CMD_READSEC
-    sta     FDC_STAT
-    jsr     _fdc_drq
+    sta     FDC_CMD
     ldy     #0
-:   lda     FDC_DATA
+@byte:
+    jsr     _fdc_drq
+    lda     FDC_DATA
     sta     (dsk_buf), y
     iny
-    bne     :-
+    bne     @byte
     jsr     _fdc_wait
     lda     FDC_STAT
-    and     #$1C
-    beq     :+
+    and     #$1C            ; lost data / CRC error / record not found
+    beq     @ok
     sec
     rts
-:   clc
+@ok:
+    clc
     rts
 
 ; Write one 256-byte sector
@@ -1993,20 +1996,22 @@ fdc_write_sector:
     jsr     _fdc_seek
     sty     FDC_SEC
     lda     #FDC_CMD_WRITESEC
-    sta     FDC_STAT
-    jsr     _fdc_drq
+    sta     FDC_CMD
     ldy     #0
-:   lda     (dsk_buf), y
+@byte:
+    jsr     _fdc_drq
+    lda     (dsk_buf), y
     sta     FDC_DATA
     iny
-    bne     :-
+    bne     @byte
     jsr     _fdc_wait
     lda     FDC_STAT
-    and     #$7C
-    beq     :+
+    and     #$7C            ; + write protect / write error
+    beq     @ok
     sec
     rts
-:   clc
+@ok:
+    clc
     rts
 
 ; Get FDC status
