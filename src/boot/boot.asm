@@ -18,8 +18,6 @@ pg          = $F5           ; current sector page base high byte ($C0 + idx)
 ;-------------------------------------------------------------------------------
         sei
         cld
-        lda     #'A'
-        sta     $BB80
         lda     #FDC_CTRL_READY
         sta     FDC_CTRL
         sta     $0480           ; Sedoric's shadow copy
@@ -36,8 +34,6 @@ pg          = $F5           ; current sector page base high byte ($C0 + idx)
         and     #$01            ; BUSY
         bne     @wait_restore
 
-        lda     #'B'
-        sta     $BB81
 ;-------------------------------------------------------------------------------
 ; Destination = $C000, first sector = track 1 / sector 1
 ;-------------------------------------------------------------------------------
@@ -76,7 +72,7 @@ pg          = $F5           ; current sector page base high byte ($C0 + idx)
         lda     #FDC_CMD_READSEC
         sta     FDC_CMD
         lda     pg
-        sta     $0266           ; patch hi byte of STA $C000,Y ($0264) for this sector
+        sta     $025C           ; patch hi byte of STA $C000,Y ($025A) for this sector
         ldy     #0
 @byte_loop:
         lda     FDC_DRQ
@@ -100,13 +96,6 @@ pg          = $F5           ; current sector page base high byte ($C0 + idx)
 @next:
         dex
         bne     @sector_loop
-        lda     #'C'
-        sta     $BB82
         jmp     COLD_START
 @fail:
-        lda     #'D'
-        sta     $BB83
-        jmp     halt
-
-halt:
-        jmp     halt
+        jmp     COLD_START
