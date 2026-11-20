@@ -84,15 +84,18 @@ pg          = $F5           ; current sector page base high byte ($C0 + idx)
         lda     FDC_STAT
         and     #$1C            ; lost data / CRC error / record not found
         bne     @fail
-        inc     pg
+@wait_done:
+        lda     FDC_STAT
+        and     #$01            ; wait until command completes
+        bne     @wait_done
+        inc     pg              ; advance destination page
         inc     sector
-        cmp     #18
+        lda     sector
+        cmp     #18             ; sectors 1..17 per track
         bne     @next
         lda     #1
         sta     sector
         inc     track
-        lda     #$C0
-        sta     pg
 @next:
         dex
         bne     @sector_loop

@@ -36,7 +36,6 @@ Makefile
 oric.cfg                     # ld65 config for main image (BIOS + CODE)
 build_image.py               # convert linked output -> out/SYSTEM.ORIC (6400 bytes)
 makedisk.py                  # build bootable out/SYSTEM.dsk (MFM_DISK, Sedoric layout)
-build_disk.py                # legacy/alternate disk builder script (not used by Makefile)
 include/
   oric_hardware.i            # Oric memory map, VIA/FDC/ULA constants
   pcode_constants.i          # p-code/CSP/unit constants
@@ -172,7 +171,8 @@ Actual runtime layout and segment placement may evolve during bring-up.
 - Columns selected via VIA/PSG port A, row sense via VIA PB3
 
 ### Microdisc WD1793 FDC
-- Registers around `$0310-$0313`, control at `$0314`, DRQ status at `$0318` (bit 7)
+- WD1793 register mapping as used by Microdisc/Oricutron: `$0310` command/status, `$0311` track, `$0312` sector, `$0313` data, `$0314` control, `$0318` DRQ status (bit 7; byte ready when 0 / DRQ asserted)
+- Writing the track register does **not** seek; use a Seek command (target track in data register) and wait for BUSY to clear
 - Overlay RAM/ROM control is critical during boot and disk I/O
 
 ## Microdisc ROM boot flow (critical - reverse engineered)
@@ -193,12 +193,12 @@ RESET -> init hardware -> init I/O vectors
 
 ### Key facts (reference)
 
-- ROM reads **track 0, sector 1** (not sector 0) to `$C000`.
+- ROM reads **track 0, sector 1** (not sector 0) to `$C000` via the Microdisc FDC.
 - "Insert system disc" is the default boot screen until a valid `SYSTEMDOS` is found/loaded.
 - Directory entries are 16 bytes starting at offset `$26` in the directory sector (Sedoric-style layout).
 - Expected primary filename is `SYSTEMDOS` (BOOTUPCOM handling is ROM-specific; not required for our current strategy).
-- Init check requires `$C013` (boot sector) to be non-zero.
-- Descriptor/data-sector conventions and ROM vector behavior are subtle; see format notes below.
+- Boot-sector/init checks require expected marker bytes to be non-zero (commonly including `$C013` in observed layouts); exact checks are ROM-specific.
+- Descriptor/data-sector conventions and ROM vector behavior are subtle and ROM-specific; see format notes below and validate against ROM/Oricutron behavior.
 
 ## Sedoric file system format (reference)
 
