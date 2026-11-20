@@ -7,8 +7,10 @@ The image is a real Sedoric-style boot disk, as expected by the Microdisc ROM:
   track 0, sector 1  Sedoric boot sector (only inspected by the ROM)
   track 0, sector 2  SYSTEMDOS descriptor: loads the boot loader to $0200
   track 0, sector 3  directory: a single "SYSTEMDOS" entry
-  track 0, sectors 5-12  UCSD p-System volume/directory header (blocks 2-5)
+  track 0, sectors 5-12  UCSD p-System volume/directory (blocks 2-5)
   track 1, sector 1+ the p-System system image, read by the boot loader
+  UCSD file data blocks starting at block 21 (SYSTEM.PASCAL, COMPILER, EDITOR,
+  FILER, LIBRARY)
 
 Nothing here is a "ROM": the system image is loaded into the Oric's overlay
 RAM by the loader at $0200, which then jumps to COLD_START ($C152).
@@ -30,14 +32,26 @@ SIDE = 0
 SYS_IMAGE = os.path.join("out", "SYSTEM.ORIC")   # 6400-byte system image
 LOADER = os.path.join("out", "boot.bin")         # loader assembled at $0200
 DSK_PATH = os.path.join("out", "SYSTEM.dsk")
+UCSD_DIR = os.path.join("ucsd")
 
 SYS_SECTORS = 25                 # 6400 bytes -> $C000-$D8FF
 SYS_FIRST_TRACK = 1
 SYS_FIRST_SECTOR = 1
+UCSD_FIRST_FILE_BLOCK = 21       # after dir (2-5) and clear of system image area
 
 LOADER_ADDR = 0x0200
 LOADER_VECTOR = 0x0200
 ZERO_TARGET = 0x9FD0             # ROM prints the boot message from here
+
+# UCSD p-System files to include on the volume (name, source path, file kind)
+# File kinds (Apple/UCSD Pascal 1.3): 2=CODE, 3=TEXT, 5=DATA
+UCSD_FILES = [
+    (b"SYSTEM.PASCAL",   os.path.join(UCSD_DIR, "SYSTEM.PASCAL"),   2),
+    (b"SYSTEM.COMPILER", os.path.join(UCSD_DIR, "SYSTEM.COMPILER"), 2),
+    (b"SYSTEM.EDITOR",   os.path.join(UCSD_DIR, "SYSTEM.EDITOR"),   2),
+    (b"SYSTEM.FILER",    os.path.join(UCSD_DIR, "SYSTEM.FILER"),    2),
+    (b"SYSTEM.LIBRARY",  os.path.join(UCSD_DIR, "SYSTEM.LIBRARY"),  2),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -175,11 +189,12 @@ def make_descriptor(loader):
     return bytes(desc)
 
 
-def make_ucsd_directory(total_blocks, vol_name=b"ORIC", dir_last_block=6):
+def make_ucsd_directory(total_blocks, files, vol_name=b"ORIC", dir_last_block=6):
     """Create UCSD p-System directory blocks (blocks 2..dir_last_block-1).
 
-    Returns 4 * 512 bytes for blocks 2-5 with a valid volume header entry
-    and no file entries (Apple/UCSD Pascal 1.3-style layout).
+    `files` is a list of dicts with keys: name(bytes), dfirst, dlast, dfkind,
+    dlastbyte. Returns 4 * 512 bytes for blocks 2-5 (Apple/UCSD Pascal 1.3
+    style 26-byte entries).
     """
     if dir_last_block != 6:
         raise ValueError("only 4-block directory (blocks 2-5) is supported")
@@ -200,13 +215,28 @@ def make_ucsd_directory(total_blocks, vol_name=b"ORIC", dir_last_block=6):
     # 14-15: DEOVBLK (total blocks on volume)
     buf[14:16] = (total_blocks).to_bytes(2, "little")
     # 16-17: DNUMFILES
-    buf[16:18] = (0).to_bytes(2, "little")
+    buf[16:18] = (len(files)).to_bytes(2, "little")
     # 18-19: DLOADTIME
     buf[18:20] = (0).to_bytes(2, "little")
     # 20-21: DLASTBOOT
     buf[20:22] = (0).to_bytes(2, "little")
-    # 22-25: reserved/unused (remain zero)
 
+    # File entries follow immediately after volume header (26 bytes each)
+    off = 26
+    for entry in files:
+        if off + 26 > len(buf):
+            raise ValueError("too many UCSD directory entries for allocated blocks")
+        fname = bytes(entry["name"][:15])
+        buf[off + 0:off + 2] = (entry["dfirst"]).to_bytes(2, "little")
+        buf[off + 2:off + 4] = (entry["dlast"]).to_bytes(2, "little")
+        buf[off + 4:off + 6] = (entry["dfkind"]).to_bytes(2, "little")
+        buf[off + 6] = len(fname)
+        buf[off + 7:off + 22] = fname.ljust(15, b" ")
+        buf[off + 22:off + 24] = (entry["dlastbyte"]).to_bytes(2, "little")
+        buf[off + 24:off + 26] = (0).to_bytes(2, "little")  # DACCESS/date
+        off += 26
+
+    # Remaining bytes in directory area stay zero (end-of-directory marker)
     return bytes(buf)
 
 
@@ -231,11 +261,40 @@ def build():
     sectors[(0, 2)] = make_descriptor(loader)
     sectors[(0, 3)] = make_directory(desc_sector=2, desc_track=0)
 
-    # UCSD p-System directory header (blocks 2-5 => track 0 sectors 5-12).
+    # Prepare UCSD files and place them starting at UCSD_FIRST_FILE_BLOCK.
+    # This avoids Sedoric/UCSD directory blocks (0-5,7 on T0) and the
+    # system-image sectors loaded by the boot loader (T1S1..T2S8 / blocks 8-20).
+    total_blocks = TRACKS * SECTORS // 2
+    file_entries = []
+    file_payloads = []
+    next_block = UCSD_FIRST_FILE_BLOCK
+    for fname, path, dfkind in UCSD_FILES:
+        with open(path, "rb") as f:
+            data = f.read()
+        if not data:
+            sys.exit(f"UCSD file is empty: {path}")
+        blocks = (len(data) + 511) // 512
+        if next_block + blocks > total_blocks:
+            sys.exit(f"not enough disk space for UCSD file: {path}")
+        padded = data + b"\x00" * (blocks * 512 - len(data))
+        dlastbyte = len(data) % 512 or 512
+        entry = {
+            "name": fname,
+            "dfirst": next_block,
+            "dlast": next_block + blocks,
+            "dfkind": dfkind,
+            "dlastbyte": dlastbyte,
+        }
+        file_entries.append(entry)
+        file_payloads.append((entry, padded))
+        next_block += blocks
+
+    # UCSD p-System directory (blocks 2-5 => track 0 sectors 5-12).
     # Uses the linear 512-byte block mapping expected by our BIOS:
     #   256-byte sector = block*2 (+1), track = sector/17, sector = sector%17 + 1
     ucsd_dir = make_ucsd_directory(
-        total_blocks=TRACKS * SECTORS // 2,
+        total_blocks=total_blocks,
+        files=file_entries,
         vol_name=b"ORIC",
         dir_last_block=6,
     )
@@ -256,6 +315,19 @@ def build():
             number = 1
             track += 1
 
+    # UCSD file data blocks
+    for entry, payload in file_payloads:
+        for i in range(entry["dfirst"], entry["dlast"]):
+            chunk = payload[(i - entry["dfirst"]) * 512:(i - entry["dfirst"] + 1) * 512]
+            for part in (0, 1):
+                linear = i * 2 + part
+                t = linear // SECTORS
+                n = (linear % SECTORS) + 1
+                key = (t, n)
+                if key in sectors:
+                    raise ValueError(f"sector collision at T{t}/S{n} while writing UCSD file {entry['name']!r}")
+                sectors[key] = chunk[part * SECTOR_SIZE:(part + 1) * SECTOR_SIZE]
+
     # Encode into an MFM_DISK image
     image = bytearray()
     image += b"MFM_DISK"
@@ -274,7 +346,11 @@ def build():
 
     print(f"Created {DSK_PATH} ({len(image)} bytes, {TRACKS} tracks)")
     print(f"  SYSTEMDOS loader: {len(loader)} bytes -> ${LOADER_ADDR:04X}")
-    print(f"  UCSD directory  : volume ORIC:, {TRACKS * SECTORS // 2} blocks, dir blocks 2-5 (0 files)")
+    print(f"  UCSD directory  : volume ORIC:, {total_blocks} blocks, dir blocks 2-5 ({len(file_entries)} files)")
+    for entry in file_entries:
+        print(f"    - {entry['name'].decode('ascii')}: "
+              f"blocks {entry['dfirst']}-{entry['dlast']} "
+              f"({entry['dlast'] - entry['dfirst']} blocks)")
     print(f"  System image    : {len(system)} bytes "
           f"({SYS_SECTORS} sectors from track {SYS_FIRST_TRACK})")
 
