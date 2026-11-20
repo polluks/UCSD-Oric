@@ -26,8 +26,8 @@ $(OUTDIR)/bios.o: src/bios.asm src/include/*.i | $(OUTDIR)
 $(LINKED): $(OUTDIR)/bios.o src/oric.cfg | $(OUTDIR)
 	$(LD) $(LDFLAGS) -o $@ $(OUTDIR)/bios.o --mapfile $(OUTDIR)/system.map
 
-$(SYSIMG): $(LINKED) src/build_image.py $(OUTDIR)/system.map
-	$(PY) src/build_image.py
+$(SYSIMG): $(LINKED) build_image.py $(OUTDIR)/system.map
+	$(PY) build_image.py
 
 $(OUTDIR)/boot.o: src/boot.asm src/include/*.i | $(OUTDIR)
 	$(AS) $(CFLAGS) -o $@ $<
@@ -35,8 +35,8 @@ $(OUTDIR)/boot.o: src/boot.asm src/include/*.i | $(OUTDIR)
 $(LOADER): $(OUTDIR)/boot.o src/boot.cfg
 	$(LD) -C src/boot.cfg -o $@ $(OUTDIR)/boot.o
 
-$(DSK): $(SYSIMG) $(LOADER) src/makedisk.py
-	$(PY) src/makedisk.py
+$(DSK): $(SYSIMG) $(LOADER) makedisk.py
+	$(PY) makedisk.py
 
 # Build the system image only
 image: $(SYSIMG)

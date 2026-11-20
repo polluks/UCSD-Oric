@@ -12,7 +12,7 @@ The image is a real Sedoric-style boot disk, as expected by the Microdisc ROM:
 Nothing here is a "ROM": the system image is loaded into the Oric's overlay
 RAM by the loader at $0200, which then jumps to COLD_START ($C152).
 
-Usage: python3 src/makedisk.py
+Usage: python3 makedisk.py
 """
 
 import os

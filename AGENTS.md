@@ -17,9 +17,9 @@ Both machines use the 6502 CPU but differ significantly in hardware. The strateg
 ## Current status
 
 Implemented / in progress:
-- Sedoric-compatible Microdisc boot structures and MFM disk image generation (`src/makedisk.py`)
+- Sedoric-compatible Microdisc boot structures and MFM disk image generation (`makedisk.py`)
 - SYSTEMDOS boot loader (`src/boot.asm`, linked at `$0200`) that reads 25 sectors (6400 bytes) from track 1 into `$C000` and jumps to `COLD` (`$C152`)
-- Main BIOS/interpreter image build pipeline (`src/bios.asm`, `src/oric.cfg`, `src/build_image.py` -> `out/SYSTEM.ORIC`)
+- Main BIOS/interpreter image build pipeline (`src/bios.asm`, `src/oric.cfg`, `build_image.py` -> `out/SYSTEM.ORIC`)
 - Partial WD1793 FDC, console, and BIOS bring-up in `src/bios.asm`
 
 Known issues / TODO:
@@ -34,11 +34,11 @@ AGENTS.md
 README.md
 Makefile
 .gitignore
+build_image.py               # convert linked output -> out/SYSTEM.ORIC (6400 bytes)
+makedisk.py                  # build bootable out/SYSTEM.dsk (MFM_DISK, Sedoric layout)
 src/
   bios.asm                   # BIOS + interpreter/system code (single assembly unit)
   oric.cfg                   # ld65 config for main image (BIOS + CODE)
-  build_image.py             # convert linked output -> out/SYSTEM.ORIC (6400 bytes)
-  makedisk.py                # build bootable out/SYSTEM.dsk (MFM_DISK, Sedoric layout)
   boot.asm                   # SYSTEMDOS boot loader (runs at $0200)
   boot.cfg                   # ld65 config for boot loader
   include/
@@ -70,9 +70,9 @@ make clean    # remove out/
 Build flow:
 1. Assemble `src/bios.asm` -> `out/bios.o`
 2. Link with `src/oric.cfg` -> `out/SYSTEM.bin` (+ `out/system.map`)
-3. `src/build_image.py` lays out BIOS/BIOSDATA and CODE into a 6400-byte image -> `out/SYSTEM.ORIC` ($C000 base)
+3. `build_image.py` lays out BIOS/BIOSDATA and CODE into a 6400-byte image -> `out/SYSTEM.ORIC` ($C000 base)
 4. Assemble/link boot loader (`src/boot.asm`, `src/boot.cfg`) -> `out/boot.bin`
-5. `src/makedisk.py` creates `out/SYSTEM.dsk` (MFM_DISK, 1 side, 40 tracks, 17 sectors/track)
+5. `makedisk.py` creates `out/SYSTEM.dsk` (MFM_DISK, 1 side, 40 tracks, 17 sectors/track)
 
 ## Disk / boot (current implementation)
 
@@ -90,7 +90,7 @@ High-level ROM flow:
 
 ### Current p-System boot strategy
 
-- `src/makedisk.py` writes:
+- `makedisk.py` writes:
   - Track 0, sector 1: boot sector (Sedoric header fields required by ROM)
   - Track 0, sector 2: SYSTEMDOS descriptor
   - Track 0, sector 3: directory with `SYSTEMDOS` entry
@@ -227,7 +227,7 @@ Contains forward pointer and block/data references (pairs of track/sector), plus
 
 Data sectors can encode copy operations/count groups consumed by ROM routines, including destination/forward-pointer fields in sector header/metadata areas. Exact behavior is ROM-specific and was reverse engineered for this project.
 
-**Important:** For this project, the authoritative implementation details are in `src/makedisk.py`, `src/boot.asm`, and emulator/ROM behavior observed during debugging.
+**Important:** For this project, the authoritative implementation details are in `makedisk.py`, `src/boot.asm`, and emulator/ROM behavior observed during debugging.
 
 ## Apple II differences to remove/adapt (interpreter/BIOS)
 

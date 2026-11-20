@@ -9,7 +9,7 @@ With fill=yes in src/oric.cfg the linker emits a contiguous memory image:
 The boot loader copies the first 6400 bytes (25 sectors) linearly to $C000,
 covering $C000-$D8FF.
 
-Usage: python3 src/build_image.py
+Usage: python3 build_image.py
 """
 
 import os

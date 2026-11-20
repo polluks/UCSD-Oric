@@ -9,10 +9,10 @@ This repository contains early bring-up work for a Microdisc-bootable Oric build
 **Work in progress.** The project is under active development and not yet booting to a usable UCSD p-System environment.
 
 Currently in the tree:
-- Bootable **MFM_DISK** image generation for Oric Microdisc (`src/makedisk.py`)
+- Bootable **MFM_DISK** image generation for Oric Microdisc (`makedisk.py`)
 - Sedoric-style boot structures (boot sector, directory, SYSTEMDOS descriptor)
 - Microdisc boot loader (`src/boot.asm`) that loads the system image from disk and jumps to COLD (`$C152`)
-- Main system source and build pipeline (`src/bios.asm`, `src/oric.cfg`, `src/build_image.py`)
+- Main system source and build pipeline (`src/bios.asm`, `src/oric.cfg`, `build_image.py`)
 - Ongoing WD1793/Microdisc FDC and console/BIOS bring-up work
 
 Known issues / limitations:
@@ -67,8 +67,8 @@ make clean   # remove out/
 - `src/include/oric_hardware.i` — Oric hardware definitions
 - `src/include/pcode_constants.i` — p-code/p-machine constants
 - `src/oric.cfg` — ld65 config for the main system image
-- `src/build_image.py` — converts linked output into `out/SYSTEM.ORIC`
-- `src/makedisk.py` — builds `out/SYSTEM.dsk` (MFM_DISK, Sedoric structures)
+- `build_image.py` — converts linked output into `out/SYSTEM.ORIC`
+- `makedisk.py` — builds `out/SYSTEM.dsk` (MFM_DISK, Sedoric structures)
 - `Makefile` — build rules
 - `AGENTS.md` — detailed porting notes and references
 
