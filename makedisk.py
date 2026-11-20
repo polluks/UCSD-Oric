@@ -29,15 +29,15 @@ SECTORS = 17
 SECTOR_SIZE = 256
 SIDE = 0
 
-SYS_IMAGE = os.path.join("out", "SYSTEM.ORIC")   # 6400-byte system image
+SYS_IMAGE = os.path.join("out", "SYSTEM.ORIC")   # 12288-byte system image
 LOADER = os.path.join("out", "boot.bin")         # loader assembled at $0200
 DSK_PATH = os.path.join("out", "SYSTEM.dsk")
 UCSD_DIR = os.path.join("ucsd")
 
-SYS_SECTORS = 25                 # 6400 bytes -> $C000-$D8FF
+SYS_SECTORS = 48                 # 12288 bytes -> $C000-$EFFF
 SYS_FIRST_TRACK = 1
 SYS_FIRST_SECTOR = 1
-UCSD_FIRST_FILE_BLOCK = 21       # after dir (2-5) and clear of system image area
+UCSD_FIRST_FILE_BLOCK = 33       # after dir (2-5) and clear of system image area (T1S1..T3S14)
 
 LOADER_ADDR = 0x0200
 LOADER_VECTOR = 0x0200

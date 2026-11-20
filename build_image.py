@@ -6,8 +6,8 @@ With fill=yes in src/oric.cfg the linker emits a contiguous memory image:
     file offset 0x0000  BIOS memory area   ($C000-$CFFF, 0x1000 bytes)
     file offset 0x1000  INTERP memory area ($D000-$EFFF, 0x2000 bytes)
 
-The boot loader copies the first 6400 bytes (25 sectors) linearly to $C000,
-covering $C000-$D8FF.
+The boot loader copies the full image (48 sectors, 12288 bytes) linearly to
+$C000, covering $C000-$EFFF.
 
 Usage: python3 build_image.py
 """
@@ -19,7 +19,7 @@ INPUT = os.path.join("out", "SYSTEM.bin")
 MAP = os.path.join("out", "system.map")
 OUTPUT = os.path.join("out", "SYSTEM.ORIC")
 
-IMAGE_SIZE = 6400          # 25 sectors of 256 bytes
+IMAGE_SIZE = 12288         # 48 sectors of 256 bytes ($C000-$EFFF)
 
 
 def segment_info(map_path):

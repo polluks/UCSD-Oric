@@ -716,9 +716,14 @@ MAINLOOP:
 @dispatch:
     asl     a
     tax
-    lda     JMPTBL+1, x
-    pha
     lda     JMPTBL, x
+    sec
+    sbc     #1
+    sta     int_tmp
+    lda     JMPTBL+1, x
+    sbc     #0
+    pha
+    lda     int_tmp
     pha
     inc     IPC
     bne     :+
@@ -892,9 +897,9 @@ P_CSP:
     lda     (IPC), y
     asl     a
     tax
-    lda     #>csp_return
+    lda     #>(csp_return-1)
     pha
-    lda     #<csp_return
+    lda     #<(csp_return-1)
     pha
     lda     $C101, x
     pha
@@ -2434,12 +2439,12 @@ csp_memav:
     rts
 
 ;===============================================================================
-; Boot p-code program - echo loop
+; Boot p-code program - echo loop (bring-up stub)
 ; Writes '!' to console, then reads/writes keys in a loop
 ;===============================================================================
 boot_pcode:
-    ; SLDC $21 '!' ; $70 addr   ; STO - store '!' at $0070
-    .byte   $21, $70, $9A
+    ; STO: (ptr, val) -> [] ; store '!' at $0070
+    .byte   $70, $21, $9A
     ; UNITWRITE(1, $70, 0, 1, 0) - write the '!'
     .byte   $00, $01, $00, $70, $01
     .byte   $9E, $06

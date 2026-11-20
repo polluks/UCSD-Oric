@@ -2,7 +2,7 @@
 
 SYS_BASE    = $C000         ; first byte of the system image
 COLD_START  = $C152         ; p-System cold start entry
-SYS_SECTORS = 25            ; 6400 bytes = $C000-$D8FF
+SYS_SECTORS = 48            ; 12288 bytes = $C000-$EFFF (full BIOS+INTERP image)
 
 ; Loader workspace (zero page)
 dstptr      = $F0           ; 2 bytes: destination pointer

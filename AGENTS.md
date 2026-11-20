@@ -250,7 +250,8 @@ Examples of Apple II-specific behavior that must be removed or replaced:
 ## Reference documents
 
 - Apple Pascal 1.3 p-machine source (annotated 6502 disassembly): `http://pascal.hansotten.com/uploads/ucsd/pcode/applepascalinterpreter%20PMACH13.TXT`
-- P-Source guide (Hyde): `http://pascal.hansotten.com/uploads/ucsd/apple/ii/Hyde_P-Source-A%20Guide%20to%20the%20APPLE%20Pascal%20System_1983.pdf`
+- P-Source guide (Hyde, PDF): `http://pascal.hansotten.com/uploads/ucsd/apple/ii/Hyde_P-Source-A%20Guide%20to%20the%20APPLE%20Pascal%20System_1983.pdf`
+- P-Source guide (Hyde, plain-text/DjVu OCR, `hyde_djvu.txt`): `https://archive.org/stream/Hyde_P-Source-A_Guide_to_the_APPLE_Pascal_System_1983/Hyde_P-Source-A_Guide_to_the_APPLE_Pascal_System_1983_djvu.txt` (searchable reference for p-code/CSP/procedure-call and runtime details)
 - UCSD p-System / UCSD Pascal Internal Architecture Guide: `http://pascal.hansotten.com/uploads/ucsd/softech/UCSD%20P-System%20&%20UCSD%20PASCAL_Internal_Architecture_Guide.pdf`
 - Oric hardware wiki: `https://wiki.defence-force.org/index.php?title=Oric_hardware`
 - Oric ULA notes: `http://www.defence-force.org/computing/oric/docs/ula.txt`
