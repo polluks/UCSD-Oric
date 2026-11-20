@@ -32,6 +32,19 @@ OFS_DSTAT  = $0C68
 OFS_HANDLERS = $0D00
 
 ;===============================================================================
+; Zero page variables
+;===============================================================================
+.zeropage
+con_ptr:    .res 2
+int_tmp:    .res 2
+int_ptr:    .res 2
+int_tmp2:   .res 2
+int_ptr2:   .res 2
+csp_ret:    .res 2
+dsk_buf:    .res 2
+cur_trk:    .res 1
+
+;===============================================================================
 ; BIOS segment ($C000-$CFFF)
 ;===============================================================================
 .segment "BIOS"
@@ -564,19 +577,8 @@ gr_init:
     rts
 
 ;===============================================================================
-; Zero page variables
+; BIOSDATA segment variables
 ;===============================================================================
-.zeropage
-con_ptr:    .res 2
-int_tmp:    .res 2
-int_ptr:    .res 2
-int_tmp2:   .res 2
-int_ptr2:   .res 2
-csp_ret:    .res 2
-dsk_buf:    .res 2
-cur_trk:    .res 1
-
-; BIOS data segment
 .segment "BIOSDATA"
 con_curcol: .res 1
 con_currow: .res 1
@@ -1255,11 +1257,12 @@ mul16:
     sta     int_tmp2
     sta     int_tmp2+1
     ldx     #16
-:   asl     int_tmp2
+@mul_loop:
+    asl     int_tmp2
     rol     int_tmp2+1
     asl     int_tmp
     rol     int_tmp+1
-    bcc     :+
+    bcc     @mul_next
     clc
     lda     int_tmp2
     adc     int_ptr
@@ -1267,8 +1270,9 @@ mul16:
     lda     int_tmp2+1
     adc     int_ptr+1
     sta     int_tmp2+1
-:   dex
-    bne     :-
+@mul_next:
+    dex
+    bne     @mul_loop
     lda     int_tmp2+1
     pha
     lda     int_tmp2
@@ -1299,7 +1303,8 @@ div16:
     sta     int_tmp2
     sta     int_tmp2+1
     ldx     #16
-:   asl     int_ptr
+@div_loop:
+    asl     int_ptr
     rol     int_ptr+1
     rol     int_tmp2
     rol     int_tmp2+1
@@ -1309,12 +1314,13 @@ div16:
     tay
     lda     int_tmp2+1
     sbc     int_tmp+1
-    bcc     :+
+    bcc     @div_next
     sty     int_tmp2
     sta     int_tmp2+1
     inc     int_ptr
-:   dex
-    bne     :-
+@div_next:
+    dex
+    bne     @div_loop
     lda     int_ptr+1
     pha
     lda     int_ptr

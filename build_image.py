@@ -2,19 +2,12 @@
 """
 Turn the ld65 output into the p-System system image used by the boot loader.
 
-The linker concatenates the BIOS, BIOSDATA and CODE segments with no padding,
-so CODE ends up right after BIOSDATA in the file:
+With fill=yes in oric.cfg the linker emits a contiguous memory image:
+    file offset 0x0000  BIOS memory area   ($C000-$CFFF, 0x1000 bytes)
+    file offset 0x1000  INTERP memory area ($D000-$EFFF, 0x2000 bytes)
 
-    file offset 0x0000  BIOS      ($C000-$CF38)
-    file offset 0x0F39  BIOSDATA  ($CF39-$CF81)
-    file offset 0x0F82  CODE      ($D000-$D8BF)
-
-The loader copies the whole image linearly to $C000, so the gap between
-BIOSDATA and CODE must be restored here:
-
-    image offset 0x0000  BIOS + BIOSDATA     -> $C000
-    image offset 0x1000  CODE                -> $D000
-    image offset 0x1900  end (6400 bytes = 25 sectors)
+The boot loader copies the first 6400 bytes (25 sectors) linearly to $C000,
+covering $C000-$D8FF.
 
 Usage: python3 build_image.py
 """
@@ -26,57 +19,64 @@ INPUT = os.path.join("out", "SYSTEM.bin")
 MAP = os.path.join("out", "system.map")
 OUTPUT = os.path.join("out", "SYSTEM.ORIC")
 
-CODE_BASE = 0xD000
 IMAGE_SIZE = 6400          # 25 sectors of 256 bytes
 
 
-def segment_sizes(map_path):
-    """Return (bios_size, biosdata_size) from the ld65 map file."""
-    sizes = {}
+def segment_info(map_path):
+    """Return segment info from the ld65 map."""
+    info = {}
     try:
         with open(map_path) as f:
             for line in f:
                 parts = line.split()
-                if len(parts) < 5 or parts[0] != "BIOS" and parts[0] != "BIOSDATA":
+                if len(parts) < 5:
                     continue
-                try:
-                    sizes[parts[0]] = int(parts[3], 16)
-                except ValueError:
-                    pass
+                name = parts[0]
+                if name in ("BIOS", "BIOSDATA", "CODE"):
+                    try:
+                        info[name] = {
+                            "start": int(parts[1], 16),
+                            "end": int(parts[2], 16),
+                            "size": int(parts[3], 16),
+                        }
+                    except ValueError:
+                        pass
     except OSError:
         pass
-
-    if "BIOS" not in sizes:
-        sys.exit(f"cannot read segment sizes from {map_path}")
-    return sizes["BIOS"], sizes.get("BIOSDATA", 0)
+    return info
 
 
 def build():
     with open(INPUT, "rb") as f:
         linked = f.read()
 
-    bios_size, biosdata_size = segment_sizes(MAP)
-    code_offset = bios_size + biosdata_size
+    if len(linked) < IMAGE_SIZE:
+        sys.exit(
+            f"linker output too small: {len(linked)} bytes (need >= {IMAGE_SIZE})"
+        )
 
-    if len(linked) < code_offset:
-        sys.exit("linker output is shorter than the BIOS/BIOSDATA segments")
-
-    image = bytearray(IMAGE_SIZE)
-    image[0:code_offset] = linked[0:code_offset]
-
-    code = linked[code_offset:]
-    code_dest = CODE_BASE - 0xC000
-    if code_dest + len(code) > IMAGE_SIZE:
-        sys.exit(f"CODE segment ({len(code)} bytes) does not fit in the image")
-    image[code_dest:code_dest + len(code)] = code
+    image = bytearray(linked[:IMAGE_SIZE])
 
     with open(OUTPUT, "wb") as f:
         f.write(image)
 
+    info = segment_info(MAP)
+    bios_end = 0xC000
+    for name in ("BIOS", "BIOSDATA"):
+        if name in info:
+            bios_end = max(bios_end, info[name]["end"] + 1)
+    bios_used = bios_end - 0xC000
+
     print(f"Created {OUTPUT} ({len(image)} bytes)")
-    print(f"  BIOS+BIOSDATA: $C000-$C{bios_size + biosdata_size - 1:03X} "
-          f"({bios_size + biosdata_size} bytes)")
-    print(f"  CODE         : $D000-$D{len(code) - 1:03X} ({len(code)} bytes)")
+    if "BIOS" in info or "BIOSDATA" in info:
+        print(
+            f"  BIOS/BIOSDATA: $C000-$C{bios_used - 1:03X} ({bios_used} bytes used)"
+        )
+    if "CODE" in info:
+        c = info["CODE"]
+        print(
+            f"  CODE         : ${c['start']:04X}-${c['end']:04X} ({c['size']} bytes)"
+        )
 
 
 if __name__ == "__main__":
