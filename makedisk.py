@@ -179,31 +179,33 @@ def make_ucsd_directory(total_blocks, vol_name=b"ORIC", dir_last_block=6):
     """Create UCSD p-System directory blocks (blocks 2..dir_last_block-1).
 
     Returns 4 * 512 bytes for blocks 2-5 with a valid volume header entry
-    and no file entries.
+    and no file entries (Apple/UCSD Pascal 1.3-style layout).
     """
     if dir_last_block != 6:
         raise ValueError("only 4-block directory (blocks 2-5) is supported")
 
     buf = bytearray(4 * SECTOR_SIZE * 2)
 
-    # Volume header entry (26 bytes, Apple/UCSD Pascal 1.3-style fields)
-    # 0-1: first block (0 for volume header)
+    # Volume header entry (26 bytes, Apple/UCSD Pascal 1.3 layout)
+    # 0-1: DFIRSTBLK (0 for volume header)
     buf[0:2] = (0).to_bytes(2, "little")
-    # 2-3: last block of directory area (first block past directory)
+    # 2-3: DLASTBLK (first block past directory area)
     buf[2:4] = (dir_last_block).to_bytes(2, "little")
-    # 4: file kind / reserved for volume header
-    buf[4] = 0
-    # 5: volume name length, 6-12: volume name
+    # 4-5: DFKIND (0 for volume header/UNTYPED)
+    buf[4:6] = (0).to_bytes(2, "little")
+    # 6: DVID length, 7-13: DVID characters
     name = bytes(vol_name[:7])
-    buf[5] = len(name)
-    buf[6:6 + 7] = name.ljust(7, b" ")
-    # 13-14: total blocks on volume
-    buf[13:15] = (total_blocks).to_bytes(2, "little")
-    # 15-16: number of files in directory
-    buf[15:17] = (0).to_bytes(2, "little")
-    # 17-18: last boot/date (unused)
-    buf[17:19] = (0).to_bytes(2, "little")
-    # remaining bytes in entry and directory area stay zero
+    buf[6] = len(name)
+    buf[7:14] = name.ljust(7, b" ")
+    # 14-15: DEOVBLK (total blocks on volume)
+    buf[14:16] = (total_blocks).to_bytes(2, "little")
+    # 16-17: DNUMFILES
+    buf[16:18] = (0).to_bytes(2, "little")
+    # 18-19: DLOADTIME
+    buf[18:20] = (0).to_bytes(2, "little")
+    # 20-21: DLASTBOOT
+    buf[20:22] = (0).to_bytes(2, "little")
+    # 22-25: reserved/unused (remain zero)
 
     return bytes(buf)
 
