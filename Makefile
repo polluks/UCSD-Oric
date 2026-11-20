@@ -3,8 +3,8 @@
 
 AS      := ca65
 LD      := ld65
-CFLAGS  := -t none -I include
-LDFLAGS := -C oric.cfg
+CFLAGS  := -t none -I src/include
+LDFLAGS := -C src/oric.cfg
 PY      := python3
 
 OUTDIR  := out
@@ -20,23 +20,23 @@ all: $(DSK)
 $(OUTDIR):
 	mkdir -p $(OUTDIR)
 
-$(OUTDIR)/bios.o: src/bios.asm include/*.i | $(OUTDIR)
+$(OUTDIR)/bios.o: src/bios.asm src/include/*.i | $(OUTDIR)
 	$(AS) $(CFLAGS) -o $@ $<
 
-$(LINKED): $(OUTDIR)/bios.o oric.cfg | $(OUTDIR)
+$(LINKED): $(OUTDIR)/bios.o src/oric.cfg | $(OUTDIR)
 	$(LD) $(LDFLAGS) -o $@ $(OUTDIR)/bios.o --mapfile $(OUTDIR)/system.map
 
-$(SYSIMG): $(LINKED) build_image.py $(OUTDIR)/system.map
-	$(PY) build_image.py
+$(SYSIMG): $(LINKED) src/build_image.py $(OUTDIR)/system.map
+	$(PY) src/build_image.py
 
-$(OUTDIR)/boot.o: src/boot/boot.asm include/*.i | $(OUTDIR)
+$(OUTDIR)/boot.o: src/boot/boot.asm src/include/*.i | $(OUTDIR)
 	$(AS) $(CFLAGS) -o $@ $<
 
 $(LOADER): $(OUTDIR)/boot.o src/boot/boot.cfg
 	$(LD) -C src/boot/boot.cfg -o $@ $(OUTDIR)/boot.o
 
-$(DSK): $(SYSIMG) $(LOADER) makedisk.py
-	$(PY) makedisk.py
+$(DSK): $(SYSIMG) $(LOADER) src/makedisk.py
+	$(PY) src/makedisk.py
 
 # Build the system image only
 image: $(SYSIMG)

@@ -2,14 +2,14 @@
 """
 Turn the ld65 output into the p-System system image used by the boot loader.
 
-With fill=yes in oric.cfg the linker emits a contiguous memory image:
+With fill=yes in src/oric.cfg the linker emits a contiguous memory image:
     file offset 0x0000  BIOS memory area   ($C000-$CFFF, 0x1000 bytes)
     file offset 0x1000  INTERP memory area ($D000-$EFFF, 0x2000 bytes)
 
 The boot loader copies the first 6400 bytes (25 sectors) linearly to $C000,
 covering $C000-$D8FF.
 
-Usage: python3 build_image.py
+Usage: python3 src/build_image.py
 """
 
 import os
