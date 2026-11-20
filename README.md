@@ -11,7 +11,7 @@ This repository contains early bring-up work for a Microdisc-bootable Oric build
 Currently in the tree:
 - Bootable **MFM_DISK** image generation for Oric Microdisc (`src/makedisk.py`)
 - Sedoric-style boot structures (boot sector, directory, SYSTEMDOS descriptor)
-- Microdisc boot loader (`src/boot/boot.asm`) that loads the system image from disk and jumps to COLD (`$C152`)
+- Microdisc boot loader (`src/boot.asm`) that loads the system image from disk and jumps to COLD (`$C152`)
 - Main system source and build pipeline (`src/bios.asm`, `src/oric.cfg`, `src/build_image.py`)
 - Ongoing WD1793/Microdisc FDC and console/BIOS bring-up work
 
@@ -62,8 +62,8 @@ make clean   # remove out/
 ## Repository layout
 
 - `src/bios.asm` — BIOS/system code (ca65)
-- `src/boot/boot.asm` — Microdisc boot loader
-- `src/boot/boot.cfg` — ld65 config for the loader
+- `src/boot.asm` — Microdisc boot loader
+- `src/boot.cfg` — ld65 config for the loader
 - `src/include/oric_hardware.i` — Oric hardware definitions
 - `src/include/pcode_constants.i` — p-code/p-machine constants
 - `src/oric.cfg` — ld65 config for the main system image

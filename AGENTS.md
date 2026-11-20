@@ -18,7 +18,7 @@ Both machines use the 6502 CPU but differ significantly in hardware. The strateg
 
 Implemented / in progress:
 - Sedoric-compatible Microdisc boot structures and MFM disk image generation (`src/makedisk.py`)
-- SYSTEMDOS boot loader (`src/boot/boot.asm`, linked at `$0200`) that reads 25 sectors (6400 bytes) from track 1 into `$C000` and jumps to `COLD` (`$C152`)
+- SYSTEMDOS boot loader (`src/boot.asm`, linked at `$0200`) that reads 25 sectors (6400 bytes) from track 1 into `$C000` and jumps to `COLD` (`$C152`)
 - Main BIOS/interpreter image build pipeline (`src/bios.asm`, `src/oric.cfg`, `src/build_image.py` -> `out/SYSTEM.ORIC`)
 - Partial WD1793 FDC, console, and BIOS bring-up in `src/bios.asm`
 
@@ -39,9 +39,8 @@ src/
   oric.cfg                   # ld65 config for main image (BIOS + CODE)
   build_image.py             # convert linked output -> out/SYSTEM.ORIC (6400 bytes)
   makedisk.py                # build bootable out/SYSTEM.dsk (MFM_DISK, Sedoric layout)
-  boot/
-    boot.asm                 # SYSTEMDOS boot loader (runs at $0200)
-    boot.cfg                 # ld65 config for boot loader
+  boot.asm                   # SYSTEMDOS boot loader (runs at $0200)
+  boot.cfg                   # ld65 config for boot loader
   include/
     oric_hardware.i          # Oric memory map, VIA/FDC/ULA constants
     pcode_constants.i        # p-code/CSP/unit constants
@@ -54,7 +53,7 @@ out/                         # build artifacts (generated)
 ```
 
 Notes:
-- `AGENTS.md` previously described a larger split file layout (`src/bios/*.s`, `src/interpreter/*.s`, etc.); the current implementation is consolidated primarily in `src/bios.asm` and `src/boot/boot.asm`.
+- `AGENTS.md` previously described a larger split file layout (`src/bios/*.s`, `src/interpreter/*.s`, etc.); the current implementation is consolidated primarily in `src/bios.asm` and `src/boot.asm`.
 - `out/` and local logs may be untracked in git.
 
 ## Build system
@@ -72,7 +71,7 @@ Build flow:
 1. Assemble `src/bios.asm` -> `out/bios.o`
 2. Link with `src/oric.cfg` -> `out/SYSTEM.bin` (+ `out/system.map`)
 3. `src/build_image.py` lays out BIOS/BIOSDATA and CODE into a 6400-byte image -> `out/SYSTEM.ORIC` ($C000 base)
-4. Assemble/link boot loader (`src/boot/boot.asm`, `src/boot/boot.cfg`) -> `out/boot.bin`
+4. Assemble/link boot loader (`src/boot.asm`, `src/boot.cfg`) -> `out/boot.bin`
 5. `src/makedisk.py` creates `out/SYSTEM.dsk` (MFM_DISK, 1 side, 40 tracks, 17 sectors/track)
 
 ## Disk / boot (current implementation)
@@ -97,7 +96,7 @@ High-level ROM flow:
   - Track 0, sector 3: directory with `SYSTEMDOS` entry
   - Track 1, sector 1+: `out/SYSTEM.ORIC` (25 sectors, 6400 bytes)
 - SYSTEMDOS descriptor loads the boot loader to `$0200` and sets entry to `$0200`.
-- `src/boot/boot.asm` (running at `$0200`):
+- `src/boot.asm` (running at `$0200`):
   - Enables overlay RAM / Microdisc FDC access (`$0314`, shadow `$0480`)
   - Restores/seeks and reads 25 sectors from disk into `$C000..` using WD1793 registers and DRQ polling
   - Uses absolute-indexed stores (`STA $C000,Y`) with a self-patched high byte for the destination page
@@ -228,7 +227,7 @@ Contains forward pointer and block/data references (pairs of track/sector), plus
 
 Data sectors can encode copy operations/count groups consumed by ROM routines, including destination/forward-pointer fields in sector header/metadata areas. Exact behavior is ROM-specific and was reverse engineered for this project.
 
-**Important:** For this project, the authoritative implementation details are in `src/makedisk.py`, `src/boot/boot.asm`, and emulator/ROM behavior observed during debugging.
+**Important:** For this project, the authoritative implementation details are in `src/makedisk.py`, `src/boot.asm`, and emulator/ROM behavior observed during debugging.
 
 ## Apple II differences to remove/adapt (interpreter/BIOS)
 

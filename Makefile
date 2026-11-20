@@ -29,11 +29,11 @@ $(LINKED): $(OUTDIR)/bios.o src/oric.cfg | $(OUTDIR)
 $(SYSIMG): $(LINKED) src/build_image.py $(OUTDIR)/system.map
 	$(PY) src/build_image.py
 
-$(OUTDIR)/boot.o: src/boot/boot.asm src/include/*.i | $(OUTDIR)
+$(OUTDIR)/boot.o: src/boot.asm src/include/*.i | $(OUTDIR)
 	$(AS) $(CFLAGS) -o $@ $<
 
-$(LOADER): $(OUTDIR)/boot.o src/boot/boot.cfg
-	$(LD) -C src/boot/boot.cfg -o $@ $(OUTDIR)/boot.o
+$(LOADER): $(OUTDIR)/boot.o src/boot.cfg
+	$(LD) -C src/boot.cfg -o $@ $(OUTDIR)/boot.o
 
 $(DSK): $(SYSIMG) $(LOADER) src/makedisk.py
 	$(PY) src/makedisk.py
