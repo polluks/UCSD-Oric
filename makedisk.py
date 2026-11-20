@@ -7,6 +7,7 @@ The image is a real Sedoric-style boot disk, as expected by the Microdisc ROM:
   track 0, sector 1  Sedoric boot sector (only inspected by the ROM)
   track 0, sector 2  SYSTEMDOS descriptor: loads the boot loader to $0200
   track 0, sector 3  directory: a single "SYSTEMDOS" entry
+  track 0, sectors 5-12  UCSD p-System volume/directory header (blocks 2-5)
   track 1, sector 1+ the p-System system image, read by the boot loader
 
 Nothing here is a "ROM": the system image is loaded into the Oric's overlay
@@ -174,6 +175,39 @@ def make_descriptor(loader):
     return bytes(desc)
 
 
+def make_ucsd_directory(total_blocks, vol_name=b"ORIC", dir_last_block=6):
+    """Create UCSD p-System directory blocks (blocks 2..dir_last_block-1).
+
+    Returns 4 * 512 bytes for blocks 2-5 with a valid volume header entry
+    and no file entries.
+    """
+    if dir_last_block != 6:
+        raise ValueError("only 4-block directory (blocks 2-5) is supported")
+
+    buf = bytearray(4 * SECTOR_SIZE * 2)
+
+    # Volume header entry (26 bytes, Apple/UCSD Pascal 1.3-style fields)
+    # 0-1: first block (0 for volume header)
+    buf[0:2] = (0).to_bytes(2, "little")
+    # 2-3: last block of directory area (first block past directory)
+    buf[2:4] = (dir_last_block).to_bytes(2, "little")
+    # 4: file kind / reserved for volume header
+    buf[4] = 0
+    # 5: volume name length, 6-12: volume name
+    name = bytes(vol_name[:7])
+    buf[5] = len(name)
+    buf[6:6 + 7] = name.ljust(7, b" ")
+    # 13-14: total blocks on volume
+    buf[13:15] = (total_blocks).to_bytes(2, "little")
+    # 15-16: number of files in directory
+    buf[15:17] = (0).to_bytes(2, "little")
+    # 17-18: last boot/date (unused)
+    buf[17:19] = (0).to_bytes(2, "little")
+    # remaining bytes in entry and directory area stay zero
+
+    return bytes(buf)
+
+
 # ---------------------------------------------------------------------------
 def build():
     with open(SYS_IMAGE, "rb") as f:
@@ -194,6 +228,22 @@ def build():
     sectors[(0, 1)] = make_boot_sector()
     sectors[(0, 2)] = make_descriptor(loader)
     sectors[(0, 3)] = make_directory(desc_sector=2, desc_track=0)
+
+    # UCSD p-System directory header (blocks 2-5 => track 0 sectors 5-12).
+    # Uses the linear 512-byte block mapping expected by our BIOS:
+    #   256-byte sector = block*2 (+1), track = sector/17, sector = sector%17 + 1
+    ucsd_dir = make_ucsd_directory(
+        total_blocks=TRACKS * SECTORS // 2,
+        vol_name=b"ORIC",
+        dir_last_block=6,
+    )
+    for block in range(2, 6):
+        chunk = ucsd_dir[(block - 2) * 512:(block - 1) * 512]
+        for part in (0, 1):
+            linear = block * 2 + part
+            t = linear // SECTORS
+            n = (linear % SECTORS) + 1
+            sectors[(t, n)] = chunk[part * SECTOR_SIZE:(part + 1) * SECTOR_SIZE]
 
     # System image, starting at track 1 / sector 1
     track, number = SYS_FIRST_TRACK, SYS_FIRST_SECTOR
@@ -222,6 +272,7 @@ def build():
 
     print(f"Created {DSK_PATH} ({len(image)} bytes, {TRACKS} tracks)")
     print(f"  SYSTEMDOS loader: {len(loader)} bytes -> ${LOADER_ADDR:04X}")
+    print(f"  UCSD directory  : volume ORIC:, {TRACKS * SECTORS // 2} blocks, dir blocks 2-5 (0 files)")
     print(f"  System image    : {len(system)} bytes "
           f"({SYS_SECTORS} sectors from track {SYS_FIRST_TRACK})")
 
