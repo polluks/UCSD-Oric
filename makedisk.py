@@ -10,7 +10,7 @@ The image is a real Sedoric-style boot disk, as expected by the Microdisc ROM:
   track 0, sectors 5-12  UCSD p-System volume/directory (blocks 2-5)
   track 1, sector 1+ the p-System system image, read by the boot loader
   UCSD file data blocks starting at block 21 (SYSTEM.PASCAL, COMPILER, EDITOR,
-  FILER, LIBRARY, MISCINFO)
+  FILER, LIBRARY, MISCINFO, CHARSET, SYNTAX)
 
 Nothing here is a "ROM": the system image is loaded into the Oric's overlay
 RAM by the loader at $0200, which then jumps to COLD_START ($C152).
@@ -52,6 +52,8 @@ UCSD_FILES = [
     (b"SYSTEM.FILER",    os.path.join(UCSD_DIR, "SYSTEM.FILER"),    2),
     (b"SYSTEM.LIBRARY",  os.path.join(UCSD_DIR, "SYSTEM.LIBRARY"),  2),
     (b"SYSTEM.MISCINFO", os.path.join(UCSD_DIR, "SYSTEM.MISCINFO"), 5),
+    (b"SYSTEM.CHARSET",  os.path.join(UCSD_DIR, "SYSTEM.CHARSET"),  5),
+    (b"SYSTEM.SYNTAX",   os.path.join(UCSD_DIR, "SYSTEM.SYNTAX"),   3),
 ]
 
 

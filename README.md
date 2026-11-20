@@ -57,7 +57,7 @@ make clean   # remove out/
 - The generated disk is an **MFM_DISK** image (the format expected by Oricutron for this setup).
 - Boot uses the Microdisc ROM’s Sedoric/SYSTEMDOS flow (reads track 0, sector 1; locates `SYSTEMDOS`; loads its descriptor payload).
 - Current strategy: the ROM loads a small loader to `$0200`; the loader reads 25 sectors (6400 bytes) of `SYSTEM.ORIC` from track 1 into `$C000` and jumps to `COLD` (`$C152`).
-- The disk also contains a UCSD p-System volume/directory header (`ORIC:`) and copies of Apple II UCSD Pascal 1.3 system files: `SYSTEM.PASCAL`, `SYSTEM.COMPILER`, `SYSTEM.EDITOR`, `SYSTEM.FILER`, `SYSTEM.LIBRARY`, `SYSTEM.MISCINFO` (from `ucsd/`, placed as UCSD file data starting at block 21). `SYSTEM.MISCINFO` is included with a best-effort Oric console adjustment (28-line screen height).
+- The disk also contains a UCSD p-System volume/directory header (`ORIC:`) and copies of Apple II UCSD Pascal 1.3 system files: `SYSTEM.PASCAL`, `SYSTEM.COMPILER`, `SYSTEM.EDITOR`, `SYSTEM.FILER`, `SYSTEM.LIBRARY`, `SYSTEM.MISCINFO`, `SYSTEM.CHARSET`, `SYSTEM.SYNTAX` (from `ucsd/`, placed as UCSD file data starting at block 21). `SYSTEM.MISCINFO` is included with a best-effort Oric console adjustment (28-line screen height).
 - No external `system.rom` is used by this project’s boot path.
 
 ## Repository layout

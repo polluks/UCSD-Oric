@@ -70,13 +70,13 @@ cur_trk:    .res 1
 CSPTBL:
     .addr   csp_ioc         ; 0  IOC
     .addr   csp_new         ; 1  NEW
-    .addr   csp_unimpl      ; 2  MVL
-    .addr   csp_unimpl      ; 3  MVR
+    .addr   csp_mvl         ; 2  MVL
+    .addr   csp_mvr         ; 3  MVR
     .addr   csp_exit        ; 4  EXIT
     .addr   csp_uread       ; 5  UREAD
     .addr   csp_uwrite      ; 6  UWRITE
-    .addr   csp_unimpl      ; 7  IDS
-    .addr   csp_unimpl      ; 8  TRS
+    .addr   csp_ids         ; 7  IDS
+    .addr   csp_trs         ; 8  TRS
     .addr   csp_tim         ; 9  TIM
     .addr   csp_flc         ; 10 FLC
     .addr   csp_unimpl      ; 11 SCN
@@ -1235,65 +1235,405 @@ P_XIT:
     jmp     COLD_START
 
 ;===============================================================================
-; Stub opcodes
+; Additional p-code opcode implementations / stubs
 ;===============================================================================
-P_ABI:  jmp     MAINLOOP
-P_ABR:  jmp     MAINLOOP
-P_ADR:  jmp     MAINLOOP
-P_LAND: jmp     MAINLOOP
-P_DIF:  jmp     MAINLOOP
-P_DVR:  jmp     MAINLOOP
-P_CHK:  jmp     MAINLOOP
-P_FLO:  jmp     MAINLOOP
-P_FLT:  jmp     MAINLOOP
-P_INN:  jmp     MAINLOOP
-P_INT:  jmp     MAINLOOP
-P_LOR:  jmp     MAINLOOP
-P_MPR:  jmp     MAINLOOP
-P_NGR:  jmp     MAINLOOP
-P_LNOT: jmp     MAINLOOP
-P_SRS:  jmp     MAINLOOP
-P_SBR:  jmp     MAINLOOP
-P_SGS:  jmp     MAINLOOP
-P_SQI:  jmp     MAINLOOP
-P_SQR:  jmp     MAINLOOP
-P_IXS:  jmp     MAINLOOP
-P_UNI:  jmp     MAINLOOP
-P_LDE:  jmp     MAINLOOP
-P_ADJ:  jmp     MAINLOOP
-P_LSA:  jmp     MAINLOOP
-P_LAE:  jmp     MAINLOOP
-P_SAS:  jmp     MAINLOOP
-P_LDP:  jmp     MAINLOOP
-P_STP:  jmp     MAINLOOP
-P_LDM:  jmp     MAINLOOP
-P_STM:  jmp     MAINLOOP
-P_LDB:  jmp     MAINLOOP
-P_STB:  jmp     MAINLOOP
-P_IXP:  jmp     MAINLOOP
-P_CIP:  jmp     MAINLOOP
-P_CLP:  jmp     MAINLOOP
-P_CBP:  jmp     MAINLOOP
-P_LDC:  jmp     MAINLOOP
-P_EQU:  jmp     MAINLOOP
-P_GEQ:  jmp     MAINLOOP
-P_GRT:  jmp     MAINLOOP
-P_LEQ:  jmp     MAINLOOP
-P_LES:  jmp     MAINLOOP
-P_NEQ:  jmp     MAINLOOP
-P_LOD:  jmp     MAINLOOP
-P_STR:  jmp     MAINLOOP
-P_LDA:  jmp     MAINLOOP
-P_IXA:  jmp     MAINLOOP
-P_INC:  jmp     MAINLOOP
-P_IND:  jmp     MAINLOOP
-P_XJP:  jmp     MAINLOOP
-P_LPA:  jmp     MAINLOOP
-P_STE:  jmp     MAINLOOP
-P_EFJ:  jmp     MAINLOOP
-P_NFJ:  jmp     MAINLOOP
+P_ABI:
+    pla
+    sta     int_tmp
+    pla
+    sta     int_tmp+1
+    bpl     @abi_done
+    lda     #0
+    sec
+    sbc     int_tmp
+    sta     int_tmp
+    lda     #0
+    sbc     int_tmp+1
+    sta     int_tmp+1
+@abi_done:
+    lda     int_tmp+1
+    pha
+    lda     int_tmp
+    pha
+    jmp     MAINLOOP
+
+P_ABR:
+P_ADR:
+P_DIF:
+P_DVR:
+P_CHK:
+P_FLO:
+P_FLT:
+P_INN:
+P_INT:
+P_MPR:
+P_NGR:
+P_SRS:
+P_SBR:
+P_SGS:
+P_SQI:
+P_SQR:
+P_IXS:
+P_UNI:
+P_LDE:
+P_ADJ:
+P_SAS:
+P_LDP:
+P_STP:
+P_LDM:
+P_STM:
+P_IXP:
+P_CIP:
+P_CLP:
+P_CBP:
+P_LOD:
+P_STR:
+P_XJP:
+P_LPA:
+P_STE:
+P_EFJ:
+P_NFJ:
+    jmp     MAINLOOP
+
+P_LAND:
+    pla
+    sta     int_tmp
+    pla
+    sta     int_tmp+1
+    pla
+    and     int_tmp
+    tay
+    pla
+    and     int_tmp+1
+    pha
+    tya
+    pha
+    jmp     MAINLOOP
+
+P_LOR:
+    pla
+    sta     int_tmp
+    pla
+    sta     int_tmp+1
+    pla
+    ora     int_tmp
+    tay
+    pla
+    ora     int_tmp+1
+    pha
+    tya
+    pha
+    jmp     MAINLOOP
+
+P_LNOT:
+    pla
+    sta     int_tmp
+    pla
+    ora     int_tmp
+    beq     @lnot_true
+    lda     #0
+    pha
+    pha
+    jmp     MAINLOOP
+@lnot_true:
+    lda     #1
+    pha
+    lda     #0
+    pha
+    jmp     MAINLOOP
+
+P_LSA:
+    ; Load string address (approx): push address of inline string bytes
+    clc
+    lda     IPC
+    adc     #1
+    tay
+    lda     IPC+1
+    adc     #0
+    pha                     ; high
+    tya
+    pha                     ; low
+    ; skip string data: first byte is length (common)
+    ldy     #0
+    lda     (IPC), y
+    clc
+    adc     #1
+    adc     IPC
+    sta     IPC
+    bcc     :+
+    inc     IPC+1
+:   jmp     MAINLOOP
+
+P_LAE:
+    ; Load address extended (level, offset) - best-effort, treat like local addr
+    jsr     get_big         ; offset
+    jsr     get_big         ; level/extra (consume if present)
+    clc
+    tya
+    adc     MP
+    sta     int_tmp
+    txa
+    adc     MP+1
+    pha
+    lda     int_tmp
+    pha
+    jmp     MAINLOOP
+
+P_LDB:
+    ; Load byte indirect
+    pla
+    sta     int_ptr
+    pla
+    sta     int_ptr+1
+    ldy     #0
+    lda     (int_ptr), y
+    pha
+    tya
+    pha
+    jmp     MAINLOOP
+
+P_STB:
+    ; Store byte indirect (value on top, address below)
+    pla
+    sta     int_tmp         ; value low
+    pla                     ; value high (ignored)
+    pla
+    sta     int_ptr         ; addr low
+    pla
+    sta     int_ptr+1       ; addr high
+    ldy     #0
+    lda     int_tmp
+    sta     (int_ptr), y
+    jmp     MAINLOOP
+
+P_LDC:
+    ; Load constant block: BIG byte count, then bytes follow
+    jsr     get_big         ; count in Y:X (byte offset units)
+    sty     int_tmp         ; byte count low
+    stx     int_tmp+1       ; byte count high
+    ldy     #0
+@ldc_loop:
+    lda     int_tmp
+    ora     int_tmp+1
+    beq     @ldc_done
+    lda     (IPC), y
+    pha                     ; push bytes (caller interprets as words)
+    iny
+    bne     @ldc_dec
+    inc     IPC+1
+@ldc_dec:
+    lda     int_tmp
+    bne     :+
+    dec     int_tmp+1
+:   dec     int_tmp
+    jmp     @ldc_loop
+@ldc_done:
+    tya
+    clc
+    adc     IPC
+    sta     IPC
+    bcc     :+
+    inc     IPC+1
+:   jmp     MAINLOOP
+
+P_EQU:
+    jsr     cmp16
+    beq     @eq_true
+    lda     #0
+    pha
+    pha
+    jmp     MAINLOOP
+@eq_true:
+    lda     #1
+    pha
+    lda     #0
+    pha
+    jmp     MAINLOOP
+
+P_NEQ:
+    jsr     cmp16
+    bne     @neq_true
+    lda     #0
+    pha
+    pha
+    jmp     MAINLOOP
+@neq_true:
+    lda     #1
+    pha
+    lda     #0
+    pha
+    jmp     MAINLOOP
+
+P_GEQ:
+    jsr     cmp16_signed
+    bpl     @ge_true
+    lda     #0
+    pha
+    pha
+    jmp     MAINLOOP
+@ge_true:
+    lda     #1
+    pha
+    lda     #0
+    pha
+    jmp     MAINLOOP
+
+P_GRT:
+    jsr     cmp16_signed
+    beq     @gt_false
+    bpl     @gt_true
+@gt_false:
+    lda     #0
+    pha
+    pha
+    jmp     MAINLOOP
+@gt_true:
+    lda     #1
+    pha
+    lda     #0
+    pha
+    jmp     MAINLOOP
+
+P_LEQ:
+    jsr     cmp16_signed
+    bmi     @le_true
+    beq     @le_true
+    lda     #0
+    pha
+    pha
+    jmp     MAINLOOP
+@le_true:
+    lda     #1
+    pha
+    lda     #0
+    pha
+    jmp     MAINLOOP
+
+P_LES:
+    jsr     cmp16_signed
+    bmi     @lt_true
+    lda     #0
+    pha
+    pha
+    jmp     MAINLOOP
+@lt_true:
+    lda     #1
+    pha
+    lda     #0
+    pha
+    jmp     MAINLOOP
+
+P_LDA:
+    jsr     get_big
+    clc
+    tya
+    adc     MP
+    sta     int_tmp
+    txa
+    adc     MP+1
+    pha
+    lda     int_tmp
+    pha
+    jmp     MAINLOOP
+
+P_LLA:
+    jsr     get_big
+    clc
+    tya
+    adc     MP
+    sta     int_tmp
+    txa
+    adc     MP+1
+    pha
+    lda     int_tmp
+    pha
+    jmp     MAINLOOP
+
+P_INC:
+    jsr     get_big
+    pla
+    sta     int_tmp
+    pla
+    sta     int_tmp+1
+    clc
+    tya
+    adc     int_tmp
+    sta     int_tmp
+    txa
+    adc     int_tmp+1
+    pha
+    lda     int_tmp
+    pha
+    jmp     MAINLOOP
+
+P_IND:
+    jsr     get_big
+    pla
+    sta     int_ptr
+    pla
+    sta     int_ptr+1
+    clc
+    tya
+    adc     int_ptr
+    sta     int_ptr
+    txa
+    adc     int_ptr+1
+    sta     int_ptr+1
+    ldy     #1
+    lda     (int_ptr), y
+    pha
+    dey
+    lda     (int_ptr), y
+    pha
+    jmp     MAINLOOP
+
+P_IXA:
+    jsr     get_big         ; element size (bytes)
+    sty     int_tmp         ; multiplier low
+    stx     int_tmp+1       ; multiplier high
+    ; index on top
+    pla
+    sta     int_ptr
+    pla
+    sta     int_ptr+1
+    ; compute index * size (16-bit)
+    lda     #0
+    sta     int_tmp2
+    sta     int_tmp2+1
+    ldx     #16
+@ixa_mul:
+    lsr     int_tmp+1
+    ror     int_tmp
+    bcc     @ixa_next
+    clc
+    lda     int_tmp2
+    adc     int_ptr
+    sta     int_tmp2
+    lda     int_tmp2+1
+    adc     int_ptr+1
+    sta     int_tmp2+1
+@ixa_next:
+    asl     int_ptr
+    rol     int_ptr+1
+    dex
+    bne     @ixa_mul
+    ; base below
+    pla
+    sta     int_ptr
+    pla
+    sta     int_ptr+1
+    clc
+    lda     int_ptr
+    adc     int_tmp2
+    sta     int_ptr
+    lda     int_ptr+1
+    adc     int_tmp2+1
+    pha
+    lda     int_ptr
+    pha
+    jmp     MAINLOOP
+
 ; P_SIND0-7 handled specially in MAINLOOP dispatch
-P_LLA:  jmp     MAINLOOP
 
 ;===============================================================================
 ; cmp16 - 16-bit unsigned comparison
@@ -1724,6 +2064,139 @@ csp_uwrite:
     pha
     rts
 
+; CSP 2: MVL - Move Left (best-effort)
+; Pops: ret, src, dst, count
+csp_mvl:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
+    pla
+    sta     int_ptr         ; src lo
+    pla
+    sta     int_ptr+1       ; src hi
+    pla
+    sta     int_ptr2        ; dst lo
+    pla
+    sta     int_ptr2+1      ; dst hi
+    pla
+    sta     int_tmp         ; count lo
+    pla
+    sta     int_tmp+1       ; count hi
+    ldy     #0
+@mvl_loop:
+    lda     int_tmp
+    ora     int_tmp+1
+    beq     @mvl_done
+    lda     (int_ptr), y
+    sta     (int_ptr2), y
+    inc     int_ptr
+    bne     :+
+    inc     int_ptr+1
+:   inc     int_ptr2
+    bne     :+
+    inc     int_ptr2+1
+:   lda     int_tmp
+    bne     :+
+    dec     int_tmp+1
+:   dec     int_tmp
+    jmp     @mvl_loop
+@mvl_done:
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
+    pha
+    rts
+
+; CSP 3: MVR - Move Right (best-effort)
+; Pops: ret, src, dst, count
+csp_mvr:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
+    pla
+    sta     int_ptr         ; src lo
+    pla
+    sta     int_ptr+1       ; src hi
+    pla
+    sta     int_ptr2        ; dst lo
+    pla
+    sta     int_ptr2+1      ; dst hi
+    pla
+    sta     int_tmp         ; count lo
+    pla
+    sta     int_tmp+1       ; count hi
+    ; start at src+count-1, dst+count-1
+    clc
+    lda     int_ptr
+    adc     int_tmp
+    sta     int_ptr
+    lda     int_ptr+1
+    adc     int_tmp+1
+    sta     int_ptr+1
+    clc
+    lda     int_ptr2
+    adc     int_tmp
+    sta     int_ptr2
+    lda     int_ptr2+1
+    adc     int_tmp+1
+    sta     int_ptr2+1
+@mvr_loop:
+    lda     int_tmp
+    ora     int_tmp+1
+    beq     @mvr_done
+    lda     int_ptr
+    bne     :+
+    dec     int_ptr+1
+:   dec     int_ptr
+    lda     int_ptr2
+    bne     :+
+    dec     int_ptr2+1
+:   dec     int_ptr2
+    ldy     #0
+    lda     (int_ptr), y
+    sta     (int_ptr2), y
+    lda     int_tmp
+    bne     :+
+    dec     int_tmp+1
+:   dec     int_tmp
+    jmp     @mvr_loop
+@mvr_done:
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
+    pha
+    rts
+
+; CSP 7: IDS - Insert/Delete Segment (no-op)
+csp_ids:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
+    ; best-effort: ignore args if any left on stack by caller conventions
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
+    pha
+    rts
+
+; CSP 8: TRS - Tree Search (stub/no-op, push 0)
+csp_trs:
+    pla
+    sta     csp_ret
+    pla
+    sta     csp_ret+1
+    lda     #0
+    pha
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
+    pha
+    rts
+
 ; CSP 9: TIM - Time (push 0)
 csp_tim:
     pla
@@ -1739,15 +2212,40 @@ csp_tim:
     pha
     rts
 
-; CSP 10: FLC - FillChar (stub)
+; CSP 10: FLC - FillChar (best-effort)
+; Pops: ret, dst, count, char
 csp_flc:
     pla
     sta     csp_ret
     pla
     sta     csp_ret+1
-    lda     #0
-    pha
-    pha
+    pla
+    sta     int_ptr         ; dst lo
+    pla
+    sta     int_ptr+1       ; dst hi
+    pla
+    sta     int_tmp         ; count lo
+    pla
+    sta     int_tmp+1       ; count hi
+    pla
+    sta     int_tmp2        ; char
+    pla                     ; char hi (ignored)
+    ldy     #0
+@flc_loop:
+    lda     int_tmp
+    ora     int_tmp+1
+    beq     @flc_done
+    lda     int_tmp2
+    sta     (int_ptr), y
+    inc     int_ptr
+    bne     :+
+    inc     int_ptr+1
+:   lda     int_tmp
+    bne     :+
+    dec     int_tmp+1
+:   dec     int_tmp
+    jmp     @flc_loop
+@flc_done:
     lda     csp_ret+1
     pha
     lda     csp_ret
