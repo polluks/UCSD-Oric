@@ -115,11 +115,48 @@ csp_unimpl:
 COLD_START:
     ldx     #$FF
     txs
+    cld
+    sei
     lda     #$FF
     sta     VIA_DDRB
     lda     #$0F
     sta     VIA_DDRA
     jsr     con_init
+    jsr     disk_init
+
+    ; Initialize p-machine / SYSCOM state
+    lda     #0
+    sta     IORSLT
+    sta     IORSLT+1
+    sta     XEQERR
+    sta     XEQERR+1
+    sta     BASE
+    sta     BASE+1
+    sta     MP
+    sta     MP+1
+    sta     JTAB
+    sta     JTAB+1
+    sta     SEG
+    sta     SEG+1
+    sta     BOMBP
+    sta     BOMBP+1
+    sta     BOMBIPC
+    sta     BOMBIPC+1
+    lda     #UNIT_DISK1
+    sta     SYSUNIT
+
+    lda     #<HEAP_START
+    sta     NP
+    lda     #>HEAP_START
+    sta     NP+1
+    lda     #<RAM_TOP
+    sta     KP
+    sta     STKBASE
+    lda     #>RAM_TOP
+    sta     KP+1
+    sta     STKBASE+1
+
+    ; Banner
     ldx     #0
 @msg_loop:
     lda     welcome_msg, x
@@ -128,24 +165,13 @@ COLD_START:
     inx
     bne     @msg_loop
 @msg_done:
-    jsr     disk_init
-    lda     #0
-    sta     BASE
-    sta     BASE+1
-    sta     MP
-    sta     MP+1
+
+    ; Start built-in boot p-code (bring-up stub)
     lda     #<boot_pcode
     sta     IPC
     lda     #>boot_pcode
     sta     IPC+1
-    lda     #<HEAP_START
-    sta     NP
-    lda     #>HEAP_START
-    sta     NP+1
-    lda     #<RAM_TOP
-    sta     KP
-    lda     #>RAM_TOP
-    sta     KP+1
+    cli
     jmp     MAINLOOP
 
 welcome_msg:
@@ -248,31 +274,41 @@ DSTAT_ENTRY:
 ; Output: con_ptr = TEXT_SCREEN + row*40 + col
 calc_video_addr:
     lda     con_currow
-    asl     a
-    asl     a
-    sta     con_tmp
-    asl     a
-    asl     a
-    asl     a
-    clc
-    adc     con_tmp
     sta     con_ptr
-    lda     con_currow
-    lsr     a
-    lsr     a
-    lsr     a
-    lsr     a
-    lsr     a
+    lda     #0
     sta     con_ptr+1
+    ; *5
+    asl     con_ptr         ; *2
+    rol     con_ptr+1
+    asl     con_ptr         ; *4
+    rol     con_ptr+1
     clc
-    lda     con_curcol
-    adc     con_ptr
+    lda     con_ptr
+    adc     con_currow
+    sta     con_ptr         ; *5
+    bcc     :+
+    inc     con_ptr+1
+:   ; *8
+    asl     con_ptr
+    rol     con_ptr+1
+    asl     con_ptr
+    rol     con_ptr+1
+    asl     con_ptr
+    rol     con_ptr+1       ; *40
+    ; +col
+    clc
+    lda     con_ptr
+    adc     con_curcol
     sta     con_ptr
     bcc     :+
     inc     con_ptr+1
-:   clc
-    lda     #>TEXT_SCREEN
-    adc     con_ptr+1
+:   ; +TEXT_SCREEN
+    clc
+    lda     con_ptr
+    adc     #<TEXT_SCREEN
+    sta     con_ptr
+    lda     con_ptr+1
+    adc     #>TEXT_SCREEN
     sta     con_ptr+1
     ldy     #0
     rts
@@ -281,26 +317,37 @@ calc_video_addr:
 ; con_init - Initialize console
 ;===============================================================================
 con_init:
+    ; Clear text screen $BB80-$BFDF (1120 bytes) to spaces
+    lda     #<TEXT_SCREEN
+    sta     con_ptr
+    lda     #>TEXT_SCREEN
+    sta     con_ptr+1
     lda     #$20
-    ldx     #0
-:   sta     TEXT_SCREEN, x
-    sta     TEXT_SCREEN+256, x
-    sta     TEXT_SCREEN+512, x
-    sta     TEXT_SCREEN+768, x
-    inx
+    ldx     #4              ; 4 * 256 = 1024 bytes
+    ldy     #0
+@clr_page:
+:   sta     (con_ptr), y
+    iny
     bne     :-
-    ldx     #$3F
-:   sta     TEXT_SCREEN+1024-64, x
+    inc     con_ptr+1
     dex
-    bpl     :-
+    bne     @clr_page
+    ; Remaining 96 bytes ($BF80-$BFDF)
+    ldy     #0
+:   sta     $BF80, y
+    iny
+    cpy     #$60
+    bne     :-
+    ; Set initial attributes on first line (ink/paper/mode)
     lda     #$00 | COLOR_WHITE
     sta     TEXT_SCREEN
     lda     #$10 | COLOR_BLACK
     sta     TEXT_SCREEN+1
     lda     #ATTR_MODE | 0           ; VIDEO: TEXT 40x28 50Hz
     sta     TEXT_SCREEN+2
-    lda     #0
+    lda     #3              ; start after attribute bytes
     sta     con_curcol
+    lda     #0
     sta     con_currow
     sta     kbd_wptr
     sta     kbd_rptr
@@ -339,7 +386,7 @@ con_write:
     lda     con_curcol
     cmp     #40
     bne     @done
-    lda     #0
+    lda     #3
     sta     con_curcol
     inc     con_currow
     lda     con_currow
@@ -349,9 +396,8 @@ con_write:
     jsr     scroll_up
     rts
 @cr:
-    lda     #0
+    lda     #3
     sta     con_curcol
-    rts
 @lf:
     inc     con_currow
     lda     con_currow
@@ -362,36 +408,56 @@ con_write:
 @done:
     rts
 @bs:
+    lda     con_curcol
+    cmp     #4              ; keep attribute bytes intact
+    bcc     @done
     dec     con_curcol
-    bpl     @done
-    lda     #39
-    sta     con_curcol
-    dec     con_currow
-    bpl     @done
-    lda     #0
-    sta     con_currow
     rts
 
 ;===============================================================================
 ; scroll_up
 ;===============================================================================
 scroll_up:
-    ldx     #0
-:   lda     TEXT_SCREEN+40, x
-    sta     TEXT_SCREEN, x
-    lda     TEXT_SCREEN+40+256, x
-    sta     TEXT_SCREEN+256, x
-    lda     TEXT_SCREEN+40+512, x
-    sta     TEXT_SCREEN+512, x
-    lda     TEXT_SCREEN+40+768, x
-    sta     TEXT_SCREEN+768, x
-    inx
+    ; Copy 1080 bytes: rows 1-27 -> rows 0-26
+    lda     #<TEXT_SCREEN
+    sta     con_ptr
+    lda     #>TEXT_SCREEN
+    sta     con_ptr+1
+    lda     #<(TEXT_SCREEN+40)
+    sta     int_ptr
+    lda     #>(TEXT_SCREEN+40)
+    sta     int_ptr+1
+    ldx     #4              ; 4*256 = 1024
+    ldy     #0
+@copy_page:
+:   lda     (int_ptr), y
+    sta     (con_ptr), y
+    iny
     bne     :-
-    lda     #$20
-    ldx     #39
-:   sta     TEXT_SCREEN+1080, x
+    inc     con_ptr+1
+    inc     int_ptr+1
     dex
-    bpl     :-
+    bne     @copy_page
+    ; Copy remaining 56 bytes (1024..1079)
+    ldy     #0
+:   lda     (int_ptr), y
+    sta     (con_ptr), y
+    iny
+    cpy     #56
+    bne     :-
+    ; Clear last line (row 27 at offset 1080) and restore attributes
+    lda     #$20
+    ldy     #0
+:   sta     TEXT_SCREEN+1080, y
+    iny
+    cpy     #40
+    bne     :-
+    lda     #$00 | COLOR_WHITE
+    sta     TEXT_SCREEN+1080
+    lda     #$10 | COLOR_BLACK
+    sta     TEXT_SCREEN+1081
+    lda     #ATTR_MODE | 0
+    sta     TEXT_SCREEN+1082
     rts
 
 ;===============================================================================
@@ -640,6 +706,14 @@ MAINLOOP:
     ldy     #0
     lda     (IPC), y
     bpl     do_SLDC
+    cmp     #$D8
+    bcc     @dispatch
+    cmp     #$E8
+    bcc     do_SLDL_op      ; $D8-$E7
+    cmp     #$F8
+    bcc     do_SLDO_op      ; $E8-$F7
+    bcs     do_SIND_op      ; $F8-$FF
+@dispatch:
     asl     a
     tax
     lda     JMPTBL+1, x
@@ -652,10 +726,70 @@ MAINLOOP:
 :   rts
 
 do_SLDC:
-    tax
-    tya
     pha
-    txa
+    tya
+    pha                     ; push 16-bit constant (hi=0, lo=value)
+    inc     IPC
+    bne     :+
+    inc     IPC+1
+:   jmp     MAINLOOP
+
+; Short Load Local ($D8-$E7), n = 1..16
+do_SLDL_op:
+    sec
+    sbc     #$D7            ; A = 1..16
+    asl     a               ; word offset
+    clc
+    adc     #12             ; local area base (MSCW-relative)
+    tay
+    lda     (MP), y
+    pha
+    dey
+    lda     (MP), y
+    pha
+    inc     IPC
+    bne     :+
+    inc     IPC+1
+:   jmp     MAINLOOP
+
+; Short Load Global ($E8-$F7), n = 1..16
+do_SLDO_op:
+    sec
+    sbc     #$E7            ; A = 1..16
+    asl     a
+    clc
+    adc     #12             ; global area base
+    tay
+    lda     (BASE), y
+    pha
+    dey
+    lda     (BASE), y
+    pha
+    inc     IPC
+    bne     :+
+    inc     IPC+1
+:   jmp     MAINLOOP
+
+; Short Index and Load ($F8-$FF), n = 0..7
+do_SIND_op:
+    and     #$07
+    sta     int_tmp         ; index
+    ; pop pointer
+    pla
+    sta     int_ptr
+    pla
+    sta     int_ptr+1
+    clc
+    lda     int_ptr
+    adc     int_tmp
+    sta     int_ptr
+    bcc     :+
+    inc     int_ptr+1
+:   ldy     #1
+    lda     (int_ptr), y
+    pha
+    dey
+    lda     (int_ptr), y
     pha
     inc     IPC
     bne     :+
@@ -663,57 +797,19 @@ do_SLDC:
 :   jmp     MAINLOOP
 
 ;===============================================================================
-; P_SLDL - Short Load Local ($D8-$E7)
+; P_SLDL / P_SLDO / P_SINDx - handled specially in MAINLOOP dispatch
+; (table entries remain for completeness but should not be reached)
 ;===============================================================================
 P_SLDL:
-    pla
-    sta     int_tmp
-    pla
-    sta     int_tmp+1
-    sec
-    lda     int_tmp
-    sbc     #<JMPTBL
-    lda     int_tmp+1
-    sbc     #>JMPTBL
-    lsr     a
-    sec
-    sbc     #$D8 - $80
-    asl     a
-    clc
-    adc     #12
-    tay
-    lda     (MP), y
-    pha
-    dey
-    lda     (MP), y
-    pha
-    jmp     MAINLOOP
-
-;===============================================================================
-; P_SLDO - Short Load Global ($E8-$F7)
-;===============================================================================
 P_SLDO:
-    pla
-    sta     int_tmp
-    pla
-    sta     int_tmp+1
-    sec
-    lda     int_tmp
-    sbc     #<JMPTBL
-    lda     int_tmp+1
-    sbc     #>JMPTBL
-    lsr     a
-    sec
-    sbc     #$E8 - $80
-    asl     a
-    clc
-    adc     #12
-    tay
-    lda     (BASE), y
-    pha
-    dey
-    lda     (BASE), y
-    pha
+P_SIND0:
+P_SIND1:
+P_SIND2:
+P_SIND3:
+P_SIND4:
+P_SIND5:
+P_SIND6:
+P_SIND7:
     jmp     MAINLOOP
 
 ;===============================================================================
@@ -1196,14 +1292,7 @@ P_LPA:  jmp     MAINLOOP
 P_STE:  jmp     MAINLOOP
 P_EFJ:  jmp     MAINLOOP
 P_NFJ:  jmp     MAINLOOP
-P_SIND0: jmp    MAINLOOP
-P_SIND1: jmp    MAINLOOP
-P_SIND2: jmp    MAINLOOP
-P_SIND3: jmp    MAINLOOP
-P_SIND4: jmp    MAINLOOP
-P_SIND5: jmp    MAINLOOP
-P_SIND6: jmp    MAINLOOP
-P_SIND7: jmp    MAINLOOP
+; P_SIND0-7 handled specially in MAINLOOP dispatch
 P_LLA:  jmp     MAINLOOP
 
 ;===============================================================================
@@ -1421,9 +1510,12 @@ csp_uread:
     sta     int_ptr+1   ; block hi
     pla
     sta     int_tmp2    ; count lo
-    pla                 ; count hi
+    pla
+    sta     int_tmp2+1  ; count hi
     pla                 ; mode lo
     pla                 ; mode hi
+    lda     #0
+    sta     IORSLT
     lda     int_ptr2
     cmp     #UNIT_CONSOLE
     beq     @con
@@ -1431,46 +1523,86 @@ csp_uread:
     beq     @con
     cmp     #UNIT_DISK1
     beq     @dsk
-    jmp     @done
+    jmp     @done_ok
 @con:
     ldy     #0
-:   jsr     con_read
+@con_loop:
+    cpy     int_tmp2
+    bcs     @done_ok
+    jsr     con_read
     sta     (dsk_buf), y
     iny
-    cpy     int_tmp2
-    bne     :-
-    jmp     @done
+    bne     @con_loop
+    jmp     @done_ok
 @dsk:
-    ; Convert 512-byte block# to 256-byte sector#: sector = block * 2
+    ; Convert 512-byte block number to starting 256-byte sector
     asl     int_ptr
     rol     int_ptr+1
-    ; Convert sector# to track/sector-on-track
-    ; Track = sector / 17, Sector-on-track = (sector % 17) + 1
+@dsk_loop:
+    lda     int_tmp2
+    ora     int_tmp2+1
+    beq     @done_ok
+    ; linear sector (int_ptr) -> track/sector
     lda     int_ptr
+    sta     int_tmp
+    lda     int_ptr+1
+    sta     int_tmp+1
     ldx     #0
-:   cmp     #17
-    bcc     :+
+@dsk_div:
+    lda     int_tmp+1
+    bne     @dsk_sub
+    lda     int_tmp
+    cmp     #17
+    bcc     @dsk_got
+@dsk_sub:
+    sec
+    lda     int_tmp
     sbc     #17
+    sta     int_tmp
+    lda     int_tmp+1
+    sbc     #0
+    sta     int_tmp+1
     inx
-    jmp     :-
-:   tay                 ; Y = sector-on-track (0-indexed)
-    iny                 ; Y = sector-on-track (1-indexed)
-    txa                 ; A = track
-    tax                 ; X = track
+    bne     @dsk_div
+@dsk_got:
+    ldy     int_tmp
+    iny                 ; 1-based sector on track
+    txa                 ; track
+    tax
     jsr     fdc_read_sector
-    bcc     @done
-    lda     #1
-    pha
+    bcs     @dsk_err
+    ; advance buffer by 256
+    inc     dsk_buf+1
+    ; next linear sector
+    inc     int_ptr
+    bne     :+
+    inc     int_ptr+1
+:
+    ; decrement count by 256
+    sec
+    lda     int_tmp2
+    sbc     #0           ; low byte of 256
+    sta     int_tmp2
+    lda     int_tmp2+1
+    sbc     #1
+    sta     int_tmp2+1
+    bcs     @dsk_loop
+    ; underflow => done
+@done_ok:
     lda     #0
+    sta     IORSLT
+    pha
     pha
     lda     csp_ret+1
     pha
     lda     csp_ret
     pha
     rts
-@done:
-    lda     #0
+@dsk_err:
+    lda     #1
+    sta     IORSLT
     pha
+    lda     #0
     pha
     lda     csp_ret+1
     pha
@@ -1497,9 +1629,12 @@ csp_uwrite:
     sta     int_ptr+1   ; block hi
     pla
     sta     int_tmp2    ; count lo
-    pla                 ; count hi
+    pla
+    sta     int_tmp2+1  ; count hi
     pla                 ; mode lo
     pla                 ; mode hi
+    lda     #0
+    sta     IORSLT
     lda     int_ptr2
     cmp     #UNIT_CONSOLE
     beq     @con
@@ -1507,33 +1642,81 @@ csp_uwrite:
     beq     @con
     cmp     #UNIT_DISK1
     beq     @dsk
-    jmp     @done
+    jmp     @done_ok
 @con:
     ldy     #0
-:   lda     (dsk_buf), y
+@con_loop:
+    cpy     int_tmp2
+    bcs     @done_ok
+    lda     (dsk_buf), y
     jsr     con_write
     iny
-    cpy     int_tmp2
-    bne     :-
-    jmp     @done
+    bne     @con_loop
+    jmp     @done_ok
 @dsk:
+    ; Convert 512-byte block number to starting 256-byte sector
     asl     int_ptr
     rol     int_ptr+1
+@dsk_loop:
+    lda     int_tmp2
+    ora     int_tmp2+1
+    beq     @done_ok
     lda     int_ptr
+    sta     int_tmp
+    lda     int_ptr+1
+    sta     int_tmp+1
     ldx     #0
-:   cmp     #17
-    bcc     :+
+@dsk_div:
+    lda     int_tmp+1
+    bne     @dsk_sub
+    lda     int_tmp
+    cmp     #17
+    bcc     @dsk_got
+@dsk_sub:
+    sec
+    lda     int_tmp
     sbc     #17
+    sta     int_tmp
+    lda     int_tmp+1
+    sbc     #0
+    sta     int_tmp+1
     inx
-    jmp     :-
-:   tay
+    bne     @dsk_div
+@dsk_got:
+    ldy     int_tmp
     iny
     txa
     tax
     jsr     fdc_write_sector
-@done:
+    bcs     @dsk_err
+    inc     dsk_buf+1
+    inc     int_ptr
+    bne     :+
+    inc     int_ptr+1
+:
+    sec
+    lda     int_tmp2
+    sbc     #0
+    sta     int_tmp2
+    lda     int_tmp2+1
+    sbc     #1
+    sta     int_tmp2+1
+    bcs     @dsk_loop
+@done_ok:
     lda     #0
+    sta     IORSLT
     pha
+    pha
+    lda     csp_ret+1
+    pha
+    lda     csp_ret
+    pha
+    rts
+@dsk_err:
+    lda     #1
+    sta     IORSLT
+    pha
+    lda     #0
     pha
     lda     csp_ret+1
     pha
@@ -1666,14 +1849,15 @@ csp_rls:
     pha
     rts
 
-; CSP 28: IOR - I/O Result (push 0 = no error)
+; CSP 28: IOR - I/O Result
 csp_ior:
     pla
     sta     csp_ret
     pla
     sta     csp_ret+1
-    lda     #0
+    lda     IORSLT
     pha
+    lda     #0
     pha
     lda     csp_ret+1
     pha
