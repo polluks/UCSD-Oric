@@ -4,6 +4,11 @@ SYS_BASE    = $C000         ; first byte of the system image
 COLD_START  = $C152         ; p-System cold start entry
 SYS_SECTORS = 48            ; 12288 bytes = $C000-$EFFF (full BIOS+INTERP image)
 
+; The Microdisc boot ROM uses much of page 2 ($0244, $024E/$024F, $0272/$0273,
+; $02C0+) as scratch while loading SYSTEMDOS.  Only the short stub at $024A is
+; safe; it jumps here, where the descriptor has already copied the real loader.
+RELOC_ADDR  = $9000
+
 ; Loader workspace (zero page)
 dstptr      = $F0           ; 2 bytes: destination pointer
 curtrk      = $F2           ; current FDC track
@@ -12,6 +17,20 @@ sector      = $F4           ; wanted sector
 pg          = $F5           ; current sector page base high byte ($C0 + idx)
 
         .segment "LOADER"
+
+; The Microdisc boot ROM copies the SYSTEMDOS payload to $0200 but enters it
+; through the fixed address $024A (the standard SYSTEMDOS entry offset).  The
+; first $44 bytes are therefore a header.  $0244 must remain the ROM's IRQ
+; trampoline ("JMP $EE22") because disk I/O during boot still uses it.
+; makedisk.py copies the code after this stub to RELOC_ADDR before the ROM
+; transfers control, since the rest of page 2 is ROM scratch.
+        .repeat $44
+        .byte   $EA
+        .endrepeat
+        .byte   $4C, $22, $EE      ; $0244: Microdisc IRQ trampoline
+        .byte   $EA, $EA, $EA      ; $0247-$0249: alignment
+
+        jmp     RELOC_ADDR         ; $024A: ROM enters SYSTEMDOS here
 
 ;-------------------------------------------------------------------------------
 ; Enable overlay RAM, disable the Microdisc ROM, keep MFM/double density
@@ -116,4 +135,5 @@ pg          = $F5           ; current sector page base high byte ($C0 + idx)
 @fail:
         lda     #'E'
         sta     $BB80                   ; top-left text cell shows an error marker
-        jmp     *                       ; halt here
+@fail_hold:
+        bne     @fail_hold              ; A is 'E' (Z clear), so loop forever

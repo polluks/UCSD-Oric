@@ -40,8 +40,9 @@ SYS_FIRST_SECTOR = 1
 UCSD_FIRST_FILE_BLOCK = 33       # after dir (2-5) and clear of system image area (T1S1..T3S14)
 
 LOADER_ADDR = 0x0200
-LOADER_VECTOR = 0x0200
-ZERO_TARGET = 0x9FD0             # ROM prints the boot message from here
+LOADER_VECTOR = 0x024A           # fixed SYSTEMDOS entry used by the boot ROM
+LOADER_RELOC = 0x9000            # safe RAM destination for the real loader
+STUB_SIZE = 0x4D                 # $0200-$024C: header + $0244 trampoline + entry
 
 # UCSD p-System files to include on the volume (name, source path, file kind)
 # File kinds (Apple/UCSD Pascal 1.3): 2=CODE, 3=TEXT, 5=DATA
@@ -149,22 +150,35 @@ def make_directory(desc_sector, desc_track):
 
 
 def make_descriptor(loader):
-    """SYSTEMDOS descriptor: copy the loader to $0200 and jump there.
+    """SYSTEMDOS descriptor with a relocated loader.
+
+    The boot ROM copies the first block to $0200 and enters it at the fixed
+    address $024A.  Unfortunately the ROM itself uses much of page 2 as scratch
+    ($0244, $024E/$024F, $0272/$0273, $02C0+), so only the short stub through
+    $024C is safe.  A second block copies the real loader to $9000 before the
+    ROM transfers control; the stub simply jumps there.
 
     Block layout (all offsets relative to the sector):
         +0/+1   forward track / sector (0,0 = last sector)
         +4/+5   destination address of the first block
         +8/+9   entry vector, copied to $C14B by the ROM
         +10     byte count of the first block
-        +11...  data
+        +11...  first-block data
 
     A subsequent block is introduced by an 0xFF marker; its own destination
     address sits at marker+2/+3 and its byte count at marker+8.
     """
-    if len(loader) > 230:
+    if len(loader) <= STUB_SIZE:
+        raise ValueError("boot loader has no relocated body")
+
+    stub = loader[:STUB_SIZE]
+    body = loader[STUB_SIZE:]
+    if len(body) > 255:
+        raise ValueError("relocated loader body too large for one block")
+    if 11 + len(stub) + 9 + len(body) > SECTOR_SIZE:
         raise ValueError("boot loader too large for one descriptor sector")
 
-    # (remaining bytes must stay zero: the ROM copy loop skips zero bytes)
+    # Remaining bytes stay zero: the ROM copy loop skips zero bytes.
     desc = bytearray(SECTOR_SIZE)
 
     desc[0] = 0                     # no following descriptor sector
@@ -174,21 +188,18 @@ def make_descriptor(loader):
     desc[8] = LOADER_VECTOR & 0xFF
     desc[9] = LOADER_VECTOR >> 8
 
-    desc[10] = len(loader)
-    desc[11:11 + len(loader)] = loader
+    desc[10] = len(stub)
+    pos = 11
+    desc[pos:pos + len(stub)] = stub
+    pos += len(stub)
 
-    # Second block: write a zero byte to $9FD0 so that the Microdisc ROM's
-    # "copy boot message to the screen" loop stops immediately.
-    marker = 11 + len(loader)
-    if marker + 10 > SECTOR_SIZE:
-        raise ValueError("boot loader too large")
-    desc[marker] = 0xFF
-    desc[marker + 2] = ZERO_TARGET & 0xFF
-    desc[marker + 3] = ZERO_TARGET >> 8
-    desc[marker + 8] = 1
-    desc[marker + 9] = 0x00
+    # Relocate the real loader away from the ROM's page-2 scratch area.
+    desc[pos] = 0xFF
+    desc[pos + 2] = LOADER_RELOC & 0xFF
+    desc[pos + 3] = LOADER_RELOC >> 8
+    desc[pos + 8] = len(body)
+    desc[pos + 9:pos + 9 + len(body)] = body
 
-    # (remaining bytes are already zero: skipped by the ROM copy loop)
     return bytes(desc)
 
 
@@ -348,7 +359,8 @@ def build():
         f.write(image)
 
     print(f"Created {DSK_PATH} ({len(image)} bytes, {TRACKS} tracks)")
-    print(f"  SYSTEMDOS loader: {len(loader)} bytes -> ${LOADER_ADDR:04X}")
+    print(f"  SYSTEMDOS loader: {len(loader)} bytes "
+          f"(stub ${LOADER_ADDR:04X}, body ${LOADER_RELOC:04X})")
     print(f"  UCSD directory  : volume ORIC:, {total_blocks} blocks, dir blocks 2-5 ({len(file_entries)} files)")
     for entry in file_entries:
         print(f"    - {entry['name'].decode('ascii')}: "

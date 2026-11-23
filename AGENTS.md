@@ -18,18 +18,18 @@ Both machines use the 6502 CPU but differ significantly in hardware. The strateg
 
 Implemented / in progress:
 - Sedoric-compatible Microdisc boot structures and MFM disk image generation (`makedisk.py`)
-- SYSTEMDOS boot loader (`src/boot.asm`, linked at `$0200`) that reads 48 sectors (12288 bytes) from track 1 into `$C000-$EFFF` and jumps to `COLD` (`$C152`)
+- SYSTEMDOS boot loader (`src/boot.asm`): a stub at `$0200` (ROM entry `$024A`) whose real body is relocated to `$9000` by the descriptor; it reads 48 sectors (12288 bytes) from track 1 into `$C000-$EFFF` and jumps to `COLD` (`$C152`)
 - Main BIOS/interpreter image build pipeline (`src/bios.asm`, `src/oric.cfg`, `build_image.py` -> `out/SYSTEM.ORIC`, 12288 bytes)
 - Partial WD1793 FDC, console, and BIOS bring-up in `src/bios.asm`
 - UCSD p-System volume/directory on disk (`ORIC:`, blocks 2-5) with UCSD files installed from block 33: `SYSTEM.PASCAL`, `SYSTEM.COMPILER`, `SYSTEM.EDITOR`, `SYSTEM.FILER`, `SYSTEM.LIBRARY`, `SYSTEM.MISCINFO` (patched for 28-line console), `SYSTEM.CHARSET`, `SYSTEM.SYNTAX`
 - p-code/CSP dispatch fixes: RTS return-address `handler_addr-1`/`csp_return-1` convention; `boot_pcode` bring-up stub uses `STO (ptr,val)`
 
 Known issues / TODO:
-- Boot/runtime on Oricutron not yet end-to-end verified (headless runs have timed out without visible confirmation of COLD/banner; bring-up still in progress)
+- Boot handoff is now traced end-to-end on Oricutron: the ROM enters at `$024A`, the relocated loader reaches `COLD` (`$C152`), and no loader error marker is raised. A usable p-System prompt is still not reached because of the p-machine/CSP gaps below.
 - Many p-code opcodes are stubs (`jmp MAINLOOP`), including procedure/call/return/segment/data-move ops (e.g. `CXP/CGP/CIP/CLP/CBP/RNP/RBP`, `LOD/STR/LDA/STE/LDE/LDM/STM/MOV`, `XJP/LDP/STP/IXP/IXS`, `ADJ/SAS/LPA/EFJ/NFJ`, real/set/other ops)
 - CSP catch-all/stubs remain (`csp_unimpl` for `SCN,13,14,ULS,SIN,COS,LOG,ATAN,LN,EXP,SQRT,POT`, and stubbed behaviors such as `TRS/LDS/TNC/RND`)
 - p-machine/runtime and segment-loading integration incomplete for running UCSD system files; no UCSD `SYSTEM.ORIC` file on the UCSD volume
-- Prerelease `bringup-20261120-4f5352b` tracks bring-up artifacts (updated for `main a6dedc3`)
+- Prereleases named `bringup-YYYYMMDD-<short-sha>` track bring-up artifacts for the corresponding `main` commit
 
 ## Project structure (current)
 
@@ -43,7 +43,7 @@ makedisk.py                  # build bootable out/SYSTEM.dsk (MFM_DISK, Sedoric 
 src/
   bios.asm                   # BIOS + interpreter/system code (single assembly unit)
   oric.cfg                   # ld65 config for main image (BIOS + CODE)
-  boot.asm                   # SYSTEMDOS boot loader (runs at $0200)
+  boot.asm                   # SYSTEMDOS boot loader (stub at $0200, body at $9000)
   boot.cfg                   # ld65 config for boot loader
   include/
     oric_hardware.i          # Oric memory map, VIA/FDC/ULA constants
@@ -102,11 +102,15 @@ High-level ROM flow:
   - Track 0, sectors 5-12: UCSD p-System volume/directory (blocks 2-5)
   - Track 1, sector 1+: `out/SYSTEM.ORIC` (48 sectors, 12288 bytes)
   - UCSD file data from block 33 onward
-- SYSTEMDOS descriptor loads the boot loader to `$0200` and sets entry to `$0200`.
-- `src/boot.asm` (running at `$0200`):
+- SYSTEMDOS descriptor:
+  - First block loads a 77-byte stub to `$0200`; entry vector is `$024A` (the fixed address used by the boot ROM)
+  - `$0244` must contain the ROM IRQ trampoline `4C 22 EE` (`JMP $EE22`)
+  - A second `0xFF` block copies the real loader body to `$9000`, away from ROM page-2 scratch (`$024E/$024F`, `$0272/$0273`, `$02C0+`)
+  - The stub at `$024A` jumps to `$9000`
+- `src/boot.asm` (body running at `$9000`):
   - Enables overlay RAM / Microdisc FDC access (`$0314`, shadow `$0480`)
   - Restores/seeks and reads 48 sectors from disk into `$C000-$EFFF` using WD1793 registers and DRQ polling
-  - Uses absolute-indexed stores (`STA $C000,Y`) with a self-patched high byte for the destination page
+  - Uses a zero-page `(dstptr),y` pointer with the page in `pg` to fill each destination page
   - Jumps to `COLD_START` (`$C152`) after loading
 
 No `system.rom` file is used.
@@ -115,7 +119,7 @@ No `system.rom` file is used.
 
 ### Layer 1: Bootloader (Microdisc, stage payload)
 - Sedoric-compatible `SYSTEMDOS` payload loaded by Microdisc ROM
-- Current implementation: loader at `$0200` loads 12288-byte system image to `$C000-$EFFF` and jumps to `$C152`
+- Current implementation: stub at `$0200`/`$024A` hands off to the relocated loader at `$9000`, which loads the 12288-byte system image to `$C000-$EFFF` and jumps to `$C152`
 
 ### Layer 2: BIOS = SYSTEM.ORIC ($C000-$CFFF) - main port task
 Replaces Apple II BIOS behavior for Oric hardware. Entry points/calling conventions must remain compatible with the p-machine/interpreter expectations.
@@ -150,10 +154,10 @@ Compiler/editor/filer/library segments should run unchanged on a correct p-machi
 ```text
 $0000-$00FF   Zero page (p-machine registers, BIOS/loader workspace)
 $0100-$01FF   6502 stack (p-machine evaluation stack)
-$0200-$02FF   Interpreter/workspace (boot loader currently linked at $0200)
+$0200-$02FF   ROM/SYSTEMDOS scratch + boot stub ($0244 IRQ trampoline, entry $024A)
 $0300-$03FF   VIA 6522 I/O + Microdisc FDC registers
 $0400-$04FF   Disk buffer / workspace
-$0500-$96FF   User heap / p-machine stack / workspace (below video memory)
+$0500-$96FF   User heap / p-machine stack / workspace (relocated loader body at $9000 during boot)
 $9700-$97FF   SYSCOM (system communication area)
 $9800-$9FFF   Character sets / HIRES-related video memory
 $A000-$BFDF   HIRES bitmap
@@ -207,6 +211,8 @@ RESET -> init hardware -> init I/O vectors
 - Expected primary filename is `SYSTEMDOS` (BOOTUPCOM handling is ROM-specific; not required for our current strategy).
 - Boot-sector/init checks require expected marker bytes to be non-zero (commonly including `$C013` in observed layouts); exact checks are ROM-specific.
 - Descriptor/data-sector conventions and ROM vector behavior are subtle and ROM-specific; see format notes below and validate against ROM/Oricutron behavior.
+- The boot path **enters SYSTEMDOS at the fixed address `$024A`** (observed as `JMP $024A` in the RAM code loaded by the ROM), not at the descriptor load address `$0200`.
+- `$0244` must retain `4C 22 EE` (`JMP $EE22`) as the ROM IRQ trampoline, and page 2 is ROM scratch during boot; our loader keeps only a stub there and relocates its body to `$9000` via a second descriptor block.
 
 ## Sedoric file system format (reference)
 
