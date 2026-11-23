@@ -21,12 +21,13 @@ VIA_ACR = $030B         ; Auxiliary Control Register
 VIA_PCR = $030C         ; Peripheral Control Register
 VIA_IFR = $030D         ; Interrupt Flag Register
 VIA_IER = $030E         ; Interrupt Enable Register
+VIA_ORA_NH = $030F      ; Output Register A, no handshake (PSG data bus)
 
 ; VIA Port B bit masks
-VIA_PB0 = $01           ; Keyboard column select bit 0
-VIA_PB1 = $02           ; Keyboard column select bit 1
-VIA_PB2 = $04           ; Keyboard column select bit 2
-VIA_PB3 = $08           ; Keyboard row sense (1 = key pressed)
+VIA_PB0 = $01           ; Keyboard row select bit 0
+VIA_PB1 = $02           ; Keyboard row select bit 1
+VIA_PB2 = $04           ; Keyboard row select bit 2
+VIA_PB3 = $08           ; Keyboard sense line (1 = key pressed)
 VIA_PB4 = $10           ; Printer STROBE (active low pulse)
 VIA_PB6 = $40           ; Tape motor control
 VIA_PB7 = $80           ; Tape data output
@@ -49,7 +50,7 @@ AY_CHC_AMP    = 10
 AY_ENV_PER_L  = 11
 AY_ENV_PER_H  = 12
 AY_ENV_CYCLE  = 13
-AY_PORT_A     = 14     ; I/O port A (keyboard row drive)
+AY_PORT_A     = 14     ; I/O port A (keyboard column mask)
 AY_PORT_B     = 15
 
 ; VIA PCR control values for AY-3-8912 register access
@@ -59,6 +60,9 @@ AY_PCR_INACTIVE   = $CC    ; CA2=0, CB2=0
 AY_PCR_SET_REG    = $EE    ; CA2=1, CB2=1 (write register number)
 AY_PCR_WRITE_DATA = $EC    ; CA2=0, CB2=1 (write data to register)
 AY_PCR_READ_DATA  = $CE    ; CA2=1, CB2=0 (read data from register)
+; PCR bits 0 and 4 (CA1/CB1 active edge) are not part of the PSG protocol and
+; must be preserved, as the Atmos ROM does: pcr = (pcr AND AY_PCR_KEEP) OR value
+AY_PCR_KEEP       = $11
 
 ;===============================================================================
 ; Microdisc FDC WD1793 at $0310
@@ -76,7 +80,7 @@ FDC_DRQ   = $0318       ; DRQ status: bit 7 = 0 -> byte available
 
 ; FDC commands (WD1793)
 FDC_CMD_RESTORE  = $03      ; Restore (seek track 0)
-FDC_CMD_SEEK     = $1F      ; Seek to track in the data register
+FDC_CMD_SEEK     = $1F      ; Seek to track in the data register (verify, slowest step)
 FDC_CMD_STEPIN   = $40      ; Step in
 FDC_CMD_STEPOUT  = $60      ; Step out
 FDC_CMD_READSEC  = $80      ; Read one sector
@@ -85,6 +89,13 @@ FDC_CMD_WRITESEC = $A0      ; Write one sector
 FDC_CMD_READADDR = $C0      ; Read address
 FDC_CMD_FORCEINT = $D0      ; Force interrupt
 FDC_CMD_READTRK  = $E0      ; Read track
+
+; FDC status register bits (read from FDC_STAT)
+FDC_ST_BUSY      = $01      ; command in progress
+FDC_ST_LOSTDATA  = $04      ; type II/III: lost data (type I: track 0)
+FDC_ST_CRC       = $08      ; CRC error
+FDC_ST_RNF       = $10      ; record not found (type I: seek error)
+FDC_ST_ERRMASK   = $1C      ; lost data | CRC | record not found / seek error
 
 ; FDC control register bits ($0314)
 ;   bit 0    IRQ enable
@@ -106,8 +117,10 @@ FDC_SDSEL       = $00       ; single density (bit2 = 0)
 ;===============================================================================
 TEXT_SCREEN = $BB80     ; Text screen base (40 x 28 chars = 1120 bytes)
 HIRES_SCREEN = $A000    ; HIRES bitmap (200 lines x 40 bytes)
-STD_CHARSET = $9800     ; Standard character set (128 chars x 8 bytes)
-ALT_CHARSET = $9C00     ; Alternate character set
+STD_CHARSET = $9800     ; HIRES mode only: standard character set (128 chars x 8 bytes)
+ALT_CHARSET = $9C00     ; HIRES mode only: alternate character set
+TXT_STD_CHARSET = $B400 ; TEXT mode: standard character set
+TXT_ALT_CHARSET = $B800 ; TEXT mode: alternate character set
 
 ; ULA inline attribute registers
 ATTR_INK   = $00       ; Foreground color (bits 2-0: 0-7)
@@ -148,12 +161,14 @@ STD_CHARSET_ADDR = $9800
 ALT_CHARSET_ADDR = $9C00
 HIRES_BASE   = $A000
 TEXT_BASE    = $BB80
-RAM_TOP      = $BFFF     ; Top of available user RAM
+; $A000-$BFDF is video memory (HIRES bitmap / text screen), so user RAM, the
+; p-machine stack and SYSCOM must stay below the HIRES character sets at $9800.
+RAM_TOP      = $96FF     ; Initial KP (stack grows down), just below SYSCOM
 BIOS_BASE    = $C000     ; SYSTEM.ORIC BIOS starts here
 INTERP_BASE  = $D000     ; p-code interpreter starts here
-SYSCOM_BASE  = $BF00     ; System communication area
+SYSCOM_BASE  = $9700     ; System communication area ($9700-$97FF)
 
-; SYSCOM variables (at $BF00)
+; SYSCOM variables (at $9700)
 IORSLT = SYSCOM_BASE + 0
 XEQERR = SYSCOM_BASE + 2
 SYSUNIT = SYSCOM_BASE + 4
