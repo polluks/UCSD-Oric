@@ -55,50 +55,66 @@ pg          = $F5           ; current sector page base high byte ($C0 + idx)
         lda     track
         cmp     curtrk
         beq     @read
-; ---- seek to the wanted track (data register = target, then SEEK) ----
+; ---- seek: data register = target track; leave the track register alone ----
         sta     FDC_DATA
-        sta     FDC_TRK
-        sta     curtrk
-        lda     #FDC_CMD_SEEK
+        lda     #FDC_CMD_SEEK           ; $14 = seek with verify
         sta     FDC_CMD
+        ldy     #10
+@d1:    dey
+        bne     @d1                     ; wait ~50 us so BUSY has time to rise
 @wait_seek:
         lda     FDC_STAT
-        and     #$01
-        bne     @wait_seek
+        lsr                             ; carry = BUSY (bit 0)
+        bcs     @wait_seek
+        and     #$08                    ; status bit 4 (seek error) >> 1
+        bne     @fail
+        lda     track
+        sta     curtrk
 
 @read:
+        lda     #0
+        sta     dstptr                  ; destination = page base, offset 0
+        lda     pg
+        sta     dstptr+1
         lda     sector
         sta     FDC_SEC
-        lda     #FDC_CMD_READSEC
+        lda     #FDC_CMD_READSEC        ; $80 = read sector
         sta     FDC_CMD
-        lda     pg
-        sta     $025C           ; patch hi byte of STA $C000,Y ($025A) for this sector
-        ldy     #0
+        ldy     #10
+@d2:    dey
+        bne     @d2                     ; ~50 us delay; leaves Y = 0
 @byte_loop:
         lda     FDC_DRQ
-        bmi     @byte_loop      ; bit7 = 1 -> no byte ready yet
+        bpl     @got                    ; bit 7 = 0 -> byte ready
+        lda     FDC_STAT
+        lsr
+        bcs     @byte_loop              ; still BUSY -> keep waiting
+        bcc     @fail                   ; command ended without data -> error
+@got:
         lda     FDC_DATA
-        sta     $C000,Y         ; base = ($C0+sector_index)*256 + Y
+        sta     (dstptr),y
         iny
         bne     @byte_loop
-        lda     FDC_STAT
-        and     #$1C            ; lost data / CRC error / record not found
-        bne     @fail
 @wait_done:
         lda     FDC_STAT
-        and     #$01            ; wait until command completes
-        bne     @wait_done
-        inc     pg              ; advance destination page
+        lsr
+        bcs     @wait_done              ; wait until the command has finished
+        and     #$0E                    ; $1C >> 1: lost data, CRC, record not found
+        bne     @fail
+        inc     pg                      ; next destination page
         inc     sector
         lda     sector
-        cmp     #18             ; sectors 1..17 per track
+        cmp     #18                     ; sectors 1..17 per track
         bne     @next
         lda     #1
         sta     sector
-        inc     track
+        inc     track                   ; next track (seek happens at loop start)
 @next:
         dex
         bne     @sector_loop
         jmp     COLD_START
+
 @fail:
-        jmp     COLD_START
+        lda     #'E'
+        sta     $BB80                   ; top-left text cell shows an error marker
+        jmp     *                       ; halt here
