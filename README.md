@@ -11,14 +11,15 @@ This repository contains early bring-up work for a Microdisc-bootable Oric build
 Currently in the tree:
 - Bootable **MFM_DISK** image generation for Oric Microdisc (`makedisk.py`)
 - Sedoric-style boot structures (boot sector, directory, SYSTEMDOS descriptor)
-- Microdisc boot loader (`src/boot.asm`) that loads the system image from disk and jumps to COLD (`$C152`)
+- Microdisc boot loader (`src/boot.asm`) that loads the 48-sector system image from disk and jumps to COLD (`$C152`)
 - Main system source and build pipeline (`src/bios.asm`, `src/oric.cfg`, `build_image.py`)
-- Ongoing WD1793/Microdisc FDC and console/BIOS bring-up work
+- UCSD p-System volume/directory (`ORIC:`) with system files on disk (`SYSTEM.PASCAL`, `COMPILER`, `EDITOR`, `FILER`, `LIBRARY`, `MISCINFO`, `CHARSET`, `SYNTAX`)
+- Ongoing WD1793/Microdisc FDC, console/BIOS, and p-code/CSP bring-up work
 
 Known issues / limitations:
-- Boot on Oricutron is still being debugged (observed freezes/emulator debug stops during boot)
-- Console and other BIOS/runtime behavior is incomplete
-- p-code system segments/runtime integration and end-to-end p-System functionality are not yet verified
+- Boot/runtime on Oricutron is not yet end-to-end verified (headless runs have timed out without visible confirmation of COLD/banner)
+- Many p-code opcodes and some CSP routines remain stubbed/best-effort
+- p-code segment loading/runtime integration and end-to-end p-System functionality are not yet verified
 
 For detailed architecture, memory layout, hardware notes, and Microdisc ROM boot analysis, see [`AGENTS.md`](AGENTS.md).
 
@@ -40,7 +41,7 @@ Build outputs are written to `out/`:
 | --- | --- |
 | `boot.bin` | SYSTEMDOS boot loader (linked for `$0200`) |
 | `SYSTEM.bin` | Linked BIOS/interpreter binary (ld65 output) |
-| `SYSTEM.ORIC` | 6400-byte system image laid out for load at `$C000` (25 sectors) |
+| `SYSTEM.ORIC` | 12288-byte system image laid out for load at `$C000-$EFFF` (48 sectors) |
 | `system.map` | Linker map |
 | `SYSTEM.dsk` | Bootable Microdisc **MFM_DISK** image |
 
@@ -56,8 +57,8 @@ make clean   # remove out/
 
 - The generated disk is an **MFM_DISK** image (the format expected by Oricutron for this setup).
 - Boot uses the Microdisc ROM’s Sedoric/SYSTEMDOS flow (reads track 0, sector 1; locates `SYSTEMDOS`; loads its descriptor payload).
-- Current strategy: the ROM loads a small loader to `$0200`; the loader reads 25 sectors (6400 bytes) of `SYSTEM.ORIC` from track 1 into `$C000` and jumps to `COLD` (`$C152`).
-- The disk also contains a UCSD p-System volume/directory header (`ORIC:`) and copies of Apple II UCSD Pascal 1.3 system files: `SYSTEM.PASCAL`, `SYSTEM.COMPILER`, `SYSTEM.EDITOR`, `SYSTEM.FILER`, `SYSTEM.LIBRARY`, `SYSTEM.MISCINFO`, `SYSTEM.CHARSET`, `SYSTEM.SYNTAX` (from `ucsd/`, placed as UCSD file data starting at block 21). `SYSTEM.MISCINFO` is included with a best-effort Oric console adjustment (28-line screen height).
+- Current strategy: the ROM loads a small loader to `$0200`; the loader reads 48 sectors (12288 bytes) of `SYSTEM.ORIC` from track 1 into `$C000-$EFFF` and jumps to `COLD` (`$C152`).
+- The disk also contains a UCSD p-System volume/directory header (`ORIC:`) and copies of Apple II UCSD Pascal 1.3 system files: `SYSTEM.PASCAL`, `SYSTEM.COMPILER`, `SYSTEM.EDITOR`, `SYSTEM.FILER`, `SYSTEM.LIBRARY`, `SYSTEM.MISCINFO`, `SYSTEM.CHARSET`, `SYSTEM.SYNTAX` (from `ucsd/`, placed as UCSD file data starting at block 33). `SYSTEM.MISCINFO` is included with a best-effort Oric console adjustment (28-line screen height).
 - No external `system.rom` is used by this project’s boot path.
 
 ## Repository layout
