@@ -18,14 +18,18 @@ Both machines use the 6502 CPU but differ significantly in hardware. The strateg
 
 Implemented / in progress:
 - Sedoric-compatible Microdisc boot structures and MFM disk image generation (`makedisk.py`)
-- SYSTEMDOS boot loader (`src/boot.asm`, linked at `$0200`) that reads 25 sectors (6400 bytes) from track 1 into `$C000` and jumps to `COLD` (`$C152`)
-- Main BIOS/interpreter image build pipeline (`src/bios.asm`, `src/oric.cfg`, `build_image.py` -> `out/SYSTEM.ORIC`)
+- SYSTEMDOS boot loader (`src/boot.asm`, linked at `$0200`) that reads 48 sectors (12288 bytes) from track 1 into `$C000-$EFFF` and jumps to `COLD` (`$C152`)
+- Main BIOS/interpreter image build pipeline (`src/bios.asm`, `src/oric.cfg`, `build_image.py` -> `out/SYSTEM.ORIC`, 12288 bytes)
 - Partial WD1793 FDC, console, and BIOS bring-up in `src/bios.asm`
+- UCSD p-System volume/directory on disk (`ORIC:`, blocks 2-5) with UCSD files installed from block 33: `SYSTEM.PASCAL`, `SYSTEM.COMPILER`, `SYSTEM.EDITOR`, `SYSTEM.FILER`, `SYSTEM.LIBRARY`, `SYSTEM.MISCINFO` (patched for 28-line console), `SYSTEM.CHARSET`, `SYSTEM.SYNTAX`
+- p-code/CSP dispatch fixes: RTS return-address `handler_addr-1`/`csp_return-1` convention; `boot_pcode` bring-up stub uses `STO (ptr,val)`
 
 Known issues / TODO:
-- Boot on Oricutron is still being debugged (freezes/emulator debug stops observed during boot; suspected JAM/illegal-opcode path under investigation)
-- Pending console/BIOS fixes noted during bring-up: `calc_video_addr` row stride/addressing, CR/row advance behavior, `con_init` screen/attribute clear range, and banner/attribute handling
-- p-code segment loading/runtime integration and end-to-end p-System operation not yet verified
+- Boot/runtime on Oricutron not yet end-to-end verified (headless runs have timed out without visible confirmation of COLD/banner; bring-up still in progress)
+- Many p-code opcodes are stubs (`jmp MAINLOOP`), including procedure/call/return/segment/data-move ops (e.g. `CXP/CGP/CIP/CLP/CBP/RNP/RBP`, `LOD/STR/LDA/STE/LDE/LDM/STM/MOV`, `XJP/LDP/STP/IXP/IXS`, `ADJ/SAS/LPA/EFJ/NFJ`, real/set/other ops)
+- CSP catch-all/stubs remain (`csp_unimpl` for `SCN,13,14,ULS,SIN,COS,LOG,ATAN,LN,EXP,SQRT,POT`, and stubbed behaviors such as `TRS/LDS/TNC/RND`)
+- p-machine/runtime and segment-loading integration incomplete for running UCSD system files; no UCSD `SYSTEM.ORIC` file on the UCSD volume
+- Prerelease `bringup-20261120-4f5352b` tracks bring-up artifacts (updated for `main a6dedc3`)
 
 ## Project structure (current)
 
@@ -34,8 +38,8 @@ AGENTS.md
 README.md
 Makefile
 .gitignore
-build_image.py               # convert linked output -> out/SYSTEM.ORIC (6400 bytes)
-makedisk.py                  # build bootable out/SYSTEM.dsk (MFM_DISK, Sedoric layout)
+build_image.py               # convert linked output -> out/SYSTEM.ORIC (12288 bytes)
+makedisk.py                  # build bootable out/SYSTEM.dsk (MFM_DISK, Sedoric + UCSD volume)
 src/
   bios.asm                   # BIOS + interpreter/system code (single assembly unit)
   oric.cfg                   # ld65 config for main image (BIOS + CODE)
@@ -44,6 +48,7 @@ src/
   include/
     oric_hardware.i          # Oric memory map, VIA/FDC/ULA constants
     pcode_constants.i        # p-code/CSP/unit constants
+ucsd/                        # UCSD system files placed on disk image
 out/                         # build artifacts (generated)
   boot.bin
   SYSTEM.bin
@@ -70,9 +75,9 @@ make clean    # remove out/
 Build flow:
 1. Assemble `src/bios.asm` -> `out/bios.o`
 2. Link with `src/oric.cfg` -> `out/SYSTEM.bin` (+ `out/system.map`)
-3. `build_image.py` lays out BIOS/BIOSDATA and CODE into a 6400-byte image -> `out/SYSTEM.ORIC` ($C000 base)
+3. `build_image.py` lays out BIOS/BIOSDATA and CODE into a 12288-byte image -> `out/SYSTEM.ORIC` (`$C000-$EFFF`)
 4. Assemble/link boot loader (`src/boot.asm`, `src/boot.cfg`) -> `out/boot.bin`
-5. `makedisk.py` creates `out/SYSTEM.dsk` (MFM_DISK, 1 side, 40 tracks, 17 sectors/track)
+5. `makedisk.py` creates `out/SYSTEM.dsk` (MFM_DISK, 1 side, 40 tracks, 17 sectors/track), writes Sedoric boot structures, system image, and UCSD volume/files
 
 ## Disk / boot (current implementation)
 
@@ -94,13 +99,15 @@ High-level ROM flow:
   - Track 0, sector 1: boot sector (Sedoric header fields required by ROM)
   - Track 0, sector 2: SYSTEMDOS descriptor
   - Track 0, sector 3: directory with `SYSTEMDOS` entry
-  - Track 1, sector 1+: `out/SYSTEM.ORIC` (25 sectors, 6400 bytes)
+  - Track 0, sectors 5-12: UCSD p-System volume/directory (blocks 2-5)
+  - Track 1, sector 1+: `out/SYSTEM.ORIC` (48 sectors, 12288 bytes)
+  - UCSD file data from block 33 onward
 - SYSTEMDOS descriptor loads the boot loader to `$0200` and sets entry to `$0200`.
 - `src/boot.asm` (running at `$0200`):
   - Enables overlay RAM / Microdisc FDC access (`$0314`, shadow `$0480`)
-  - Restores/seeks and reads 25 sectors from disk into `$C000..` using WD1793 registers and DRQ polling
+  - Restores/seeks and reads 48 sectors from disk into `$C000-$EFFF` using WD1793 registers and DRQ polling
   - Uses absolute-indexed stores (`STA $C000,Y`) with a self-patched high byte for the destination page
-  - Jumps to `COLD_START` (`$C152`) after loading (including fail path, currently)
+  - Jumps to `COLD_START` (`$C152`) after loading
 
 No `system.rom` file is used.
 
@@ -108,7 +115,7 @@ No `system.rom` file is used.
 
 ### Layer 1: Bootloader (Microdisc, stage payload)
 - Sedoric-compatible `SYSTEMDOS` payload loaded by Microdisc ROM
-- Current implementation: loader at `$0200` loads 6400-byte system image to `$C000` and jumps to `$C152`
+- Current implementation: loader at `$0200` loads 12288-byte system image to `$C000-$EFFF` and jumps to `$C152`
 
 ### Layer 2: BIOS = SYSTEM.ORIC ($C000-$CFFF) - main port task
 Replaces Apple II BIOS behavior for Oric hardware. Entry points/calling conventions must remain compatible with the p-machine/interpreter expectations.
