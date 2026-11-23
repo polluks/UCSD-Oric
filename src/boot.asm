@@ -25,14 +25,16 @@ pg          = $F5           ; current sector page base high byte ($C0 + idx)
 ;-------------------------------------------------------------------------------
 ; Restore to track 0 and wait until the controller is idle
 ;-------------------------------------------------------------------------------
-        lda     #0
+        lda     #0                      ; restore, 6 ms step rate
         sta     FDC_CMD
-        sta     FDC_TRK
-        sta     curtrk
+        sta     curtrk                  ; track register is reset by the controller itself
+        ldy     #10
+@d0:    dey
+        bne     @d0                     ; wait ~50 us so BUSY has time to rise
 @wait_restore:
         lda     FDC_STAT
-        and     #$01            ; BUSY
-        bne     @wait_restore
+        lsr                             ; carry = BUSY (bit 0)
+        bcs     @wait_restore
 
 ;-------------------------------------------------------------------------------
 ; Destination = $C000, first sector = track 1 / sector 1
@@ -47,9 +49,6 @@ pg          = $F5           ; current sector page base high byte ($C0 + idx)
 
 ;-------------------------------------------------------------------------------
 ; Read one sector at a time into $C000 + (sector_index * 256)
-; The store uses absolute indexed addressing (STA $C000,Y) with a self
-; patched high byte so each sector lands at its own page.
-; The store instruction is: 99 00 C0  = STA $C000,Y  (at $0264, hi operand $0266)
 ;-------------------------------------------------------------------------------
 @sector_loop:
         lda     track
