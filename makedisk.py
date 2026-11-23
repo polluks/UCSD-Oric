@@ -71,12 +71,12 @@ def crc16(data, crc=0xFFFF):
     return crc
 
 
-def sector_fields(sector, data):
+def sector_fields(track, sector, data):
     """Return the raw MFM bytes (sync marks, ID and data fields) for a sector."""
     out = bytearray()
 
     out += b"\x4e" * 16
-    id_field = bytes([0xA1, 0xA1, 0xA1, 0xFE, 0, SIDE, sector, 1])
+    id_field = bytes([0xA1, 0xA1, 0xA1, 0xFE, track, SIDE, sector, 1])
     crc = crc16(id_field)
     out += id_field + bytes([crc >> 8, crc & 0xFF])
 
@@ -91,7 +91,7 @@ def encode_track(track, sectors):
     """Encode one 6400-byte MFM track. `sectors` maps 1..17 to 256-byte data."""
     out = bytearray(b"\x4e" * 40)
     for number in range(1, SECTORS + 1):
-        out += sector_fields(number, sectors[number])
+        out += sector_fields(track, number, sectors[number])
     if len(out) > 6400:
         raise ValueError(f"track {track} does not fit in 6400 bytes")
     out += b"\x4e" * (6400 - len(out))

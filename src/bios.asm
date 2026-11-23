@@ -124,6 +124,21 @@ COLD_START:
     jsr     con_init
     jsr     disk_init
 
+    ; Install 6502 vectors in RAM ($FFFA-$FFFF). Microdisc ROM is disabled by
+    ; disk_init/FDC_CTRL_READY, so the system must provide its own vectors.
+    lda     #<nmi_handler
+    sta     $FFFA
+    lda     #>nmi_handler
+    sta     $FFFB
+    lda     #<COLD_START
+    sta     $FFFC
+    lda     #>COLD_START
+    sta     $FFFD
+    lda     #<irq_handler
+    sta     $FFFE
+    lda     #>irq_handler
+    sta     $FFFF
+
     ; Initialize p-machine / SYSCOM state
     lda     #0
     sta     IORSLT
@@ -2719,3 +2734,16 @@ fdc_get_status:
 :   lda     #0
     clc
     rts
+
+;===============================================================================
+; 6502 interrupt handlers (used when overlay ROM is disabled)
+;===============================================================================
+nmi_handler:
+    rti
+
+irq_handler:
+    pha
+    lda     VIA_IFR
+    sta     VIA_IFR         ; clear VIA interrupt flags (write-1 clears)
+    pla
+    rti

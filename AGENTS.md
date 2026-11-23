@@ -153,8 +153,9 @@ $0100-$01FF   6502 stack (p-machine evaluation stack)
 $0200-$02FF   Interpreter/workspace (boot loader currently linked at $0200)
 $0300-$03FF   VIA 6522 I/O + Microdisc FDC registers
 $0400-$04FF   Disk buffer / workspace
-$0500-$97FF   User heap/code area (target)
-$9800-$9FFF   Character sets
+$0500-$96FF   User heap / p-machine stack / workspace (below video memory)
+$9700-$97FF   SYSCOM (system communication area)
+$9800-$9FFF   Character sets / HIRES-related video memory
 $A000-$BFDF   HIRES bitmap
 $BB80-$BF3F   TEXT screen (40x28)
 $C000-$CFFF   BIOS (loaded system image)
